@@ -1,0 +1,19 @@
+{
+    "model_name": "mixtral-8x7b",
+    "display_name": "Mixtral-8x7B",
+    "huggingface_repo": "mistralai/Mixtral-8x7B-v0.1",
+    "model_type": "mixtral",
+    "quantization": "4bit",
+    "context_window": 32768,
+    "requirements": {
+        "min_ram": "32",
+        "min_vram": "24",
+        "recommended_vram": "32"
+    },
+    "model_options": {
+        "use_flash_attention": true,
+        "trust_remote_code": true,
+        "load_in_4bit": true,
+        "use_safetensors": true
+    }
+}

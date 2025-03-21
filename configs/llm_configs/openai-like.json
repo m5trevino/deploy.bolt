@@ -1,0 +1,18 @@
+{
+  "name": "local-model",
+  "provider": "OpenAI-Like",
+  "model_type": "local",
+  "max_tokens": 8192,
+  "base_url_key": "OPENAI_LIKE_API_BASE_URL",
+  "provider_file": "openai-like.ts",
+  "api_handler": "openai_like.py",
+  "requirements": {
+    "vram_gb": 8,
+    "cuda_required": true
+  },
+  "settings": {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "context_window": 8192
+  }
+}

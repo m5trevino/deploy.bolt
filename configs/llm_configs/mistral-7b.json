@@ -1,0 +1,20 @@
+{
+    "name": "mistral-7b",
+    "provider": "thebloke",
+    "model_type": "local",
+    "max_tokens": 8192,
+    "base_url_key": "thebloke_LOCAL_API_BASE_URL",
+    "provider_file": "mistral-7b-local.ts",
+    "api_handler": "mistral-7b.py",
+    "requirements": {
+        "vram_gb": 6,
+        "cuda_required": true
+    },
+    "settings": {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "context_window": 8192,
+        "model_path": "TheBloke/Mistral-7B-v0.1-GGUF",
+        "quantization": "4-bit"
+    }
+}
