@@ -1,261 +1,107 @@
 #!/bin/bash
 
 # Colors
-CYAN='\033[0;36m'
 GREEN='\033[0;32m'
-PURPLE='\033[0;35m'
-YELLOW='\033[1;33m'
 RED='\033[0;31m'
-BOLD='\033[1m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Function to print section header
-print_header() {
-    echo -e "\n${PURPLE}${BOLD}[+] $1 ${NC}\n"
-}
+echo -e "${CYAN}🖥️ Setting up LLM server...${NC}"
 
-# Function to print step
-print_step() {
-    echo -e "${CYAN}[*] $1${NC}"
-}
+# Move to server directory
+cd ~/llm-server || exit 1
 
-# Function to print success
-print_success() {
-    echo -e "${GREEN}[✓] $1${NC}"
-}
-
-# Function to print error
-print_error() {
-    echo -e "${RED}[✗] $1${NC}"
-    exit 1
-}
-
-# Function to check Python environment
-check_python_env() {
-    print_header "CHECKING PYTHON ENVIRONMENT"
-    
-    # Check if venv exists
-    if [ ! -d "venv" ]; then
-        print_error "Virtual environment not found! Run python_setup.sh first."
-    fi
-    
-    # Activate venv
-    source venv/bin/activate || print_error "Failed to activate virtual environment"
-    
-    print_success "Python environment activated"
-}
-
-# Function to install server dependencies
-install_dependencies() {
-    print_header "INSTALLING SERVER DEPENDENCIES"
-    
-    pip install --upgrade pip
-    
-    # Install core dependencies
-    pip install fastapi uvicorn pydantic python-dotenv torch transformers accelerate bitsandbytes sentencepiece protobuf
-    
-    # Install model-specific dependencies
-    MODEL_NAME=$(basename "$(readlink -f configs/active_model.json)" .json)
-    case $MODEL_NAME in
-        "codellama-34b")
-            pip install einops
-            ;;
-        "mixtral-8x7b")
-            pip install flash-attn --no-build-isolation
-            ;;
-        "mistral-7b")
-            pip install safetensors
-            ;;
-    esac
-    
-    print_success "Dependencies installed"
-}
-
-# Function to setup server configuration
-setup_server_config() {
-    print_header "SETTING UP SERVER CONFIGURATION"
-    
-    # Create server config directory
-    mkdir -p api-server/config
-    
-    # Create server config file
-    cat > api-server/config/server_config.json << EOF
-{
-    "host": "0.0.0.0",
-    "port": 8000,
-    "workers": 1,
-    "timeout": 300,
-    "log_level": "info",
-    "cors_origins": ["*"],
-    "max_request_size": 10485760
-}
-EOF
-    
-    print_success "Server configuration created"
-}
-
-# Function to setup logging
-setup_logging() {
-    print_header "SETTING UP LOGGING"
-    
-    # Create logs directory
-    mkdir -p logs
-    
-    # Create logging config
-    cat > api-server/config/logging.conf << EOF
-[loggers]
-keys=root,api
-
-[handlers]
-keys=consoleHandler,fileHandler
-
-[formatters]
-keys=simpleFormatter
-
-[logger_root]
-level=INFO
-handlers=consoleHandler
-
-[logger_api]
-level=INFO
-handlers=fileHandler
-qualname=api
-propagate=0
-
-[handler_consoleHandler]
-class=StreamHandler
-level=INFO
-formatter=simpleFormatter
-args=(sys.stdout,)
-
-[handler_fileHandler]
-class=FileHandler
-level=INFO
-formatter=simpleFormatter
-args=('../logs/api.log', 'a')
-
-[formatter_simpleFormatter]
-format=%(asctime)s - %(name)s - %(levelname)s - %(message)s
-EOF
-    
-    print_success "Logging configuration created"
-}
-
-# Function to setup health check endpoint
-setup_health_check() {
-    print_header "SETTING UP HEALTH CHECK"
-    
-    # Create health check file
-    cat > api-server/health_check.py << 'EOF'
+# Create main.py if it doesn't exist
+cat > main.py << 'PYEOF'
 from fastapi import FastAPI, HTTPException
-import psutil
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 
 app = FastAPI()
 
-@app.get("/health")
-async def health_check():
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class ChatRequest(BaseModel):
+    messages: list
+    temperature: float = 0.7
+    max_tokens: int = 1000
+
+# Global variables for model and tokenizer
+model = None
+tokenizer = None
+
+def load_model():
+    global model, tokenizer
+    model_path = "/home/flintx/models/mistral-7b-v0.1.Q4_K_M.gguf"
+    
+    if not os.path.exists(model_path):
+        raise HTTPException(status_code=500, detail="Model file not found")
+    
     try:
-        # System health
-        cpu_percent = psutil.cpu_percent()
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        
-        # GPU health if available
-        gpu_info = None
-        if torch.cuda.is_available():
-            gpu_info = {
-                "gpu_name": torch.cuda.get_device_name(0),
-                "gpu_memory": {
-                    "allocated": torch.cuda.memory_allocated(0) / 1024**3,
-                    "cached": torch.cuda.memory_reserved(0) / 1024**3
-                }
-            }
-        
-        # Model health
-        model_path = os.path.realpath("../configs/active_model.json")
-        model_name = os.path.basename(model_path).replace('.json', '')
-        
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            low_cpu_mem_usage=True
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    load_model()
+
+@app.post("/v1/chat/completions")
+async def chat_completion(request: ChatRequest):
+    try:
+        # Format messages
+        prompt = ""
+        for msg in request.messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            prompt += f"{role}: {content}\nassistant: "
+
+        # Generate response
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=request.max_tokens,
+            temperature=request.temperature,
+            do_sample=True
+        )
+        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
         return {
-            "status": "healthy",
-            "system": {
-                "cpu_percent": cpu_percent,
-                "memory_percent": memory.percent,
-                "disk_percent": disk.percent
-            },
-            "gpu": gpu_info,
-            "model": {
-                "name": model_name,
-                "status": "loaded"
-            }
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": response.split("assistant: ")[-1]
+                }
+            }]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
-EOF
-    
-    print_success "Health check endpoint created"
-}
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+PYEOF
 
-# Function to create server management scripts
-create_management_scripts() {
-    print_header "CREATING MANAGEMENT SCRIPTS"
-    
-    # Create start script
-    cat > server.sh << 'EOF'
-#!/bin/bash
-source venv/bin/activate
-cd api-server
-python run.py
-EOF
-    chmod +x server.sh
-    
-    # Create stop script
-    cat > stop_server.sh << 'EOF'
-#!/bin/bash
-pkill -f "python run.py"
-EOF
-    chmod +x stop_server.sh
-    
-    # Create restart script
-    cat > restart_server.sh << 'EOF'
-#!/bin/bash
-./stop_server.sh
-sleep 2
-./server.sh
-EOF
-    chmod +x restart_server.sh
-    
-    print_success "Management scripts created"
-}
+echo -e "${GREEN}✅ Created server files${NC}"
 
-# Main execution
-print_header "SERVER SETUP SCRIPT"
-
-# Check Python environment
-check_python_env
-
-# Install dependencies
-install_dependencies
-
-# Setup server configuration
-setup_server_config
-
-# Setup logging
-setup_logging
-
-# Setup health check
-setup_health_check
-
-# Create management scripts
-create_management_scripts
-
-print_success "Server setup complete! 🚀"
-echo -e "\n${YELLOW}To start the server:${NC}"
-echo -e "  ${CYAN}1. ./server.sh${NC} - Start the server"
-echo -e "  ${CYAN}2. ./stop_server.sh${NC} - Stop the server"
-echo -e "  ${CYAN}3. ./restart_server.sh${NC} - Restart the server"
+# Hand off to bolt setup
+echo -e "${CYAN}Moving to bolt.diy setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/bolt_setup.sh"
+exec "${SCRIPT_DIR}/bolt_setup.sh"

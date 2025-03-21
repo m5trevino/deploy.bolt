@@ -247,3 +247,17 @@ echo -e "  ${YELLOW}Provider: ${BOLT_DIR}/app/lib/modules/llm/providers/${safe_n
 echo -e "  ${YELLOW}Registry: ${BOLT_DIR}/app/lib/modules/llm/registry.ts${NC}"
 echo -e "  ${YELLOW}Environment: ${BOLT_DIR}/.env.local${NC}"
 echo -e "  ${YELLOW}Download Script: ${INSTALL_DIR}/download_model.py${NC}"
+echo -e "${GREEN}✅ Model config setup complete!${NC}"
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/download_model.py"
+
+echo -e "${GREEN}✅ Model config setup complete!${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/download_model.py"
+
+echo -e "${GREEN}✅ Model config setup complete!${NC}"
+echo -e "${CYAN}Moving to model download...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/download_model.py"
+exec python3 "${SCRIPT_DIR}/download_model.py"

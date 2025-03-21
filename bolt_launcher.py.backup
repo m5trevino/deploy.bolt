@@ -1,438 +1,149 @@
 #!/usr/bin/env python3
-
-import tkinter as tk
-from tkinter import ttk, messagebox
-import subprocess
 import os
-import time
-import json
 import sys
+import json
 from pathlib import Path
 
-def get_bolt_directory():
-    print("\n🔍 Detecting bolt.diy location...")
+class Colors:
+    CYAN = '\033[0;36m'
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    RED = '\033[0;31m'
+    PURPLE = '\033[0;35m'
+    BOLD = '\033[1m'
+    NC = '\033[0m'
 
-    # Common locations to check
-    possible_dirs = [
-        "/home/flintx/bolt.diy",
-        "/root/bolt.diy",
-        os.path.expanduser("~/bolt.diy")
-    ]
+def print_banner():
+    print(f"{Colors.PURPLE}")
+    print("""
+    🔥 BOLT.DIY LAUNCHER 🔥
+    ████╗  ████╗ ██╗  ████╗
+    ██╔══██╗██╔═══██╗██║  ╚══██╔══╝
+    ████╔╝██║   ██║██║     ██║
+    ██╔══██╗██║   ██║██║     ██║
+    ████╔╝╚████╔╝████╗   ██║
+    ╚════╝  ╚════╝ ╚════╝   ╚═╝
+    """)
+    print(f"{Colors.NC}")
 
-    print("\nPossible bolt.diy locations:")
-    for i, dir in enumerate(possible_dirs, 1):
-        status = "✅ exists" if os.path.exists(dir) else "❌ not found"
-        print(f"{i}. {dir} ({status})")
+def clear_screen():
+    os.system('clear' if os.name == 'posix' else 'cls')
 
-    print("\nSelect bolt.diy directory:")
-    print("1-3: Use one of the above locations")
-    print("4: Enter custom path")
+def get_script_dir():
+    return Path(__file__).parent.absolute()
 
-    choice = input("\nYour choice (1-4): ").strip()
-
-    if choice in ['1', '2', '3']:
-        bolt_dir = possible_dirs[int(choice)-1]
-    else:
-        bolt_dir = input("\nEnter full path to bolt.diy directory: ").strip()
-
-    # Verify directory
-    if not os.path.exists(bolt_dir):
-        create = input(f"\n{bolt_dir} doesn't exist. Create it? (y/n): ").lower()
-        if create == 'y':
-            os.makedirs(bolt_dir, exist_ok=True)
-            print(f"Created {bolt_dir}")
-        else:
-            return None
-
-    print(f"\n✅ Using bolt.diy directory: {bolt_dir}")
-    return bolt_dir
-
-def setup_paths():
-    if os.path.exists("/home/flintx/llm-server"):
-        server_dir = "/home/flintx/llm-server"
-    else:
-        server_dir = os.path.expanduser("~/llm-server")
-
-    config_dirs = [
-        f"{server_dir}/configs",
-        f"{server_dir}/configs/llm_configs"
-    ]
-
-    for d in config_dirs:
-        os.makedirs(d, exist_ok=True)
-        os.chmod(d, 0o755)
-
-    return server_dir
-
-class TaskStatus:
-    PENDING = "🔴"
-    RUNNING = "🟡"
-    COMPLETE = "🟢"
-    FAILED = "❌"
-    class BoltLauncherGUI:
-        def __init__(self, root):
-            self.root = root
-        self.root.title("🔥 BOLT.DIY Launcher")
-        self.root.geometry("800x600")
-        self.root.configure(bg='#2e2e2e')
-
-        self.server_dir = setup_paths()
-
-        self.main_frame = tk.Frame(root, bg='#2e2e2e')
-        self.main_frame.pack(expand=True, fill='both', padx=20, pady=20)
-
-        self.show_main_menu()
-
-    def show_main_menu(self):
-        self.clear_frame()
-
-        ascii_art = """
-        🔥 BOLT.DIY LAUNCHER 🔥
-        ████╗  ████╗ ██╗  ████╗
-        ██╔══██╗██╔═══██╗██║  ╚══██╔══╝
-        ████╔╝██║   ██║██║    ██║
-        ██╔══██╗██║   ██║██║    ██║
-        ████╔╝╚████╔╝████╗██║
-        ╚════╝  ╚════╝ ╚════╝╚═╝
-        """
-
-        title = tk.Label(self.main_frame, text=ascii_art,
-                        font=('Courier', 10), bg='#2e2e2e', fg='#00ff00')
-        title.pack(pady=20)
-
-        button_style = {
-            'width': 40,
-            'height': 2,
-            'bg': '#4e4e4e',
-            'fg': 'white',
-            'activebackground': '#5e5e5e',
-            'activeforeground': 'white',
-            'font': ('Helvetica', 10, 'bold')
-        }
-
-        tk.Button(self.main_frame,
-                 text="🆕 Setup New Bolt.DIY Installation",
-                 command=lambda: self.show_task_screen("new_setup"),
-                 **button_style).pack(pady=10)
-
-        tk.Button(self.main_frame,
-                 text="➕ Add New LLM to Existing Setup",
-                 command=lambda: self.show_task_screen("add_llm"),
-                 **button_style).pack(pady=10)
-
-    def clear_frame(self):
-        for widget in self.main_frame.winfo_children():
-            widget.destroy()
-            def show_task_screen(self, mode):
-                self.clear_frame()
-
-    header_text = "🆕 New Installation Setup" if mode == "new_setup" else "➕ Adding New LLM"
-    tk.Label(self.main_frame, text=header_text,
-            font=('Helvetica', 14, 'bold'),
-            bg='#2e2e2e', fg='#00ff00').pack(pady=10)
-
-    canvas = tk.Canvas(self.main_frame, bg='#2e2e2e', highlightthickness=0)
-    scrollbar = ttk.Scrollbar(self.main_frame, orient="vertical", command=canvas.yview)
-    scrollable_frame = tk.Frame(canvas, bg='#2e2e2e')
-
-    scrollable_frame.bind(
-        "<Configure>",
-        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-    )
-
-    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-    canvas.configure(yscrollcommand=scrollbar.set)
-
-    tasks = self.get_tasks(mode)
-    self.task_labels = {}
-
-    for task in tasks:
-        frame = tk.Frame(scrollable_frame, bg='#2e2e2e')
-        frame.pack(fill='x', pady=5)
-
-        status_label = tk.Label(frame, text=TaskStatus.PENDING,
-                              font=('Helvetica', 12),
-                              bg='#2e2e2e', fg='white')
-        status_label.pack(side='left', padx=10)
-
-        task_label = tk.Label(frame, text=task['description'],
-                            font=('Helvetica', 10),
-                            bg='#2e2e2e', fg='white',
-                            anchor='w')
-        task_label.pack(side='left', fill='x', expand=True)
-
-        self.task_labels[task['id']] = {
-            'status': status_label,
-            'label': task_label
-        }
-
-    canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-    scrollbar.pack(side="right", fill="y")
-
-    tk.Button(self.main_frame,
-             text="🚀 Start Process",
-             command=lambda: self.start_tasks(mode, tasks),
-             bg='#4e4e4e',
-             fg='white',
-             font=('Helvetica', 12, 'bold')).pack(pady=20)
-
-def get_tasks(self, mode):
-    base_tasks = [
-        {'id': 'shell_check', 'description': 'Detecting shell environment...'},
-        {'id': 'node_check', 'description': 'Checking Node.js environment...'},
-        {'id': 'pnpm_check', 'description': 'Validating pnpm installation...'}
-    ]
-
-    if mode == "new_setup":
-        base_tasks.extend([
-            {'id': 'bolt_clone', 'description': 'Cloning bolt.diy repository...'},
-            {'id': 'bolt_deps', 'description': 'Installing dependencies...'},
-            {'id': 'bolt_setup', 'description': 'Setting up bolt.diy...'},
-            {'id': 'server_setup', 'description': 'Configuring server...'}
-        ])
-
-    base_tasks.extend([
-        {'id': 'llm_config', 'description': 'Configuring LLM...'},
-        {'id': 'model_download', 'description': 'Downloading model...'},  # Added this task
-        {'id': 'server_start', 'description': 'Starting LLM server...'},
-        {'id': 'ui_launch', 'description': 'Launching bolt.diy UI...'}
-    ])
-
-    return base_tasks
-    def update_task_status(self, task_id, status):
-        if task_id in self.task_labels:
-            self.task_labels[task_id]['status'].config(text=status)
-            self.root.update()
-
-    def start_tasks(self, mode, tasks):
-        for task in tasks:
-            self.update_task_status(task['id'], TaskStatus.RUNNING)
-            success = self.execute_task(mode, task['id'])
-
-        if success:
-            self.update_task_status(task['id'], TaskStatus.COMPLETE)
-        else:
-            self.update_task_status(task['id'], TaskStatus.FAILED)
-            messagebox.showerror("Error", f"Failed at: {task['description']}")
-            return
-
-    messagebox.showinfo("Success", "🎉 All tasks completed successfully!")
-    self.show_main_menu()
-
-def execute_task(self, mode, task_id):
-    try:
-        if task_id == 'llm_config':
-            print("🔥 BOLT.DIY LLM ADDER 🔥")
-
-            # Get bolt.diy directory first
-            bolt_dir = get_bolt_directory()
-            if not bolt_dir:
-                print("❌ No valid bolt.diy directory selected!")
-                return False
-
-            print("\n📝 Enter LLM details:")
-            llm_name = input("Enter LLM name (e.g., mixtral-8x7b): ")
-            provider_name = input("Enter provider name (e.g., mistralai): ")
-            display_name = input("Enter display name (e.g., Mixtral): ")
-            model_path = input("Enter model path (HF repo or local): ")
-            vram_gb = input("Enter VRAM required (GB): ")
-            max_tokens = input("Enter max tokens: ")
-
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            bolt_custom_path = os.path.join(script_dir, "bolt_custom.sh")
-
-            os.chmod(bolt_custom_path, 0o755)
-
-            # Pass VIRTUAL_ENV if we're in one
-            env = os.environ.copy()
-            if 'VIRTUAL_ENV' in os.environ:
-                env['VIRTUAL_ENV'] = os.environ['VIRTUAL_ENV']
-
-            # Run the script with input redirection to allow terminal input
-            process = subprocess.Popen([
-                bolt_custom_path,
-                '--bolt-dir', bolt_dir
-            ], stdin=subprocess.PIPE, stdout=None, stderr=None, text=True, env=env)
-
-            inputs = f"{llm_name}\n{provider_name}\n{display_name}\n{model_path}\n{vram_gb}\n{max_tokens}\n"
-            process.communicate(inputs)
-
-            if process.returncode == 0:
-                print("✅ LLM added successfully!")
-                return True
-            else:
-                print("❌ Failed to add LLM!")
-                return False
-
-        elif task_id == 'model_download':  # New task for model download
-            print("📥 Downloading model...")
+def get_available_models():
+    """Get list of configured models from configs directory"""
+    config_dir = Path("/home/flintx/deploy.bolt/configs/llm_configs")
+    models = []
+    if config_dir.exists():
+        for file in config_dir.glob("*.json"):
             try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                download_script = os.path.join(script_dir, "download_model.py")
+                with open(file) as f:
+                    config = json.load(f)
+                    models.append({
+                        'name': config.get('name', file.stem),
+                        'provider': config.get('provider', 'Unknown'),
+                        'config_file': file.name
+                    })
+            except:
+                continue
+    return models
 
-                # Make sure the models directory exists
-                models_dir = os.path.expanduser("~/models")
-                os.makedirs(models_dir, exist_ok=True)
+def show_model_menu():
+    """Display available models and get user choice"""
+    models = get_available_models()
+    if not models:
+        print(f"{Colors.RED}No LLM configurations found!{Colors.NC}")
+        return None
+    
+    print(f"\n{Colors.CYAN}Available LLMs:{Colors.NC}")
+    for idx, model in enumerate(models, 1):
+        print(f"{Colors.YELLOW}{idx}. {Colors.NC}{model['name']} ({model['provider']})")
+    
+    while True:
+        try:
+            choice = int(input(f"\n{Colors.GREEN}Choose LLM (1-{len(models)}): {Colors.NC}"))
+            if 1 <= choice <= len(models):
+                return models[choice-1]
+        except ValueError:
+            pass
+        print(f"{Colors.RED}Invalid choice. Try again.{Colors.NC}")
 
-                process = subprocess.Popen(
-                    [sys.executable, download_script],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    universal_newlines=True
-                )
+def main():
+    clear_screen()
+    print_banner()
 
-                # Monitor the download progress
-                while True:
-                    output = process.stdout.readline()
-                    if output:
-                        print(output.strip())
-                    if process.poll() is not None:
-                        break
+    print(f"{Colors.CYAN}Select your move:{Colors.NC}")
+    print(f"{Colors.YELLOW}1. {Colors.NC}Set up new bolt.diy installation")
+    print(f"{Colors.YELLOW}2. {Colors.NC}Add new LLM to existing setup")
+    print(f"{Colors.YELLOW}3. {Colors.NC}Start existing LLM setup")
+    print(f"{Colors.YELLOW}4. {Colors.NC}Monitor system status")
+    print(f"{Colors.YELLOW}5. {Colors.NC}Cleanup & Exit")
+    print(f"{Colors.YELLOW}6. {Colors.NC}Exit")
 
-                if process.returncode == 0:
-                    print("✅ Model downloaded successfully!")
-                    return True
-                else:
-                    print("❌ Model download failed!")
-                    error_output = process.stderr.read()
-                    print(f"Error: {error_output}")
-                    return False
+    while True:
+        choice = input(f"\n{Colors.GREEN}Your choice (1-6): {Colors.NC}").strip()
 
-            except Exception as e:
-                print(f"Download error: {str(e)}")
-                return False
-                elif task_id == 'server_start':
-            print("🚀 Setting up server...")
-            try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                server_script = os.path.join(script_dir, "server.sh")
-                os.chmod(server_script, 0o755)
+        script_dir = get_script_dir()
 
-                # Get the saved venv path from config
-                venv_config = os.path.expanduser("~/.bolt_venvs.conf")
-                if os.path.exists(venv_config):
-                    with open(venv_config, 'r') as f:
-                        first_line = f.readline().strip()
-                        if first_line:
-                            venv_name, venv_path = first_line.split(':')
-                            env = os.environ.copy()
-                            env['BOLT_VENV'] = venv_path
-                            print(f"Using saved venv: {venv_path}")
-                        else:
-                            print("❌ No venv configured in ~/.bolt_venvs.conf")
-                            return False
-                else:
-                    print("❌ No venv config found at ~/.bolt_venvs.conf")
-                    return False
+        if choice == '1':
+            setup_script = script_dir / "setup_environment.sh"
+            if not setup_script.exists():
+                print(f"{Colors.RED}❌ setup_environment.sh not found!{Colors.NC}")
+                sys.exit(1)
+            os.chmod(setup_script, 0o755)
+            os.execv(str(setup_script), [str(setup_script)])
 
-                # Start server in background with environment variable
-                process = subprocess.Popen(
-                    [server_script],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                    env=env
-                )
+        elif choice == '2':
+            custom_script = script_dir / "bolt_custom.sh"
+            if not custom_script.exists():
+                print(f"{Colors.RED}❌ bolt_custom.sh not found!{Colors.NC}")
+                sys.exit(1)
+            os.chmod(custom_script, 0o755)
+            os.execv(str(custom_script), [str(custom_script)])
 
-                # Monitor the output
-                while True:
-                    output = process.stdout.readline()
-                    if output:
-                        print(output.strip())
-                        if "Server started successfully!" in output:
-                            return True
-                        if "failed to start" in output:
-                            return False
-                    if process.poll() is not None:
-                        break
-
-                if process.returncode == 0:
-                    print("✅ Server started successfully!")
-                    return True
-                else:
-                    print("❌ Server failed to start!")
-                    error_output = process.stderr.read()
-                    print(f"Error: {error_output}")
-                    return False
-
-            except Exception as e:
-                print(f"Server start error: {str(e)}")
-                return False
-
-        elif task_id == 'ui_launch':
-            print("🚀 Launching bolt.diy...")
-            try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                launch_script = os.path.join(script_dir, "launch_bolt.sh")
+        elif choice == '3':
+            model = show_model_menu()
+            if model:
+                # Export model choice for launch_bolt.sh
+                os.environ['SELECTED_MODEL'] = model['name']
+                launch_script = script_dir / "launch_bolt.sh"
+                if not launch_script.exists():
+                    print(f"{Colors.RED}❌ launch_bolt.sh not found!{Colors.NC}")
+                    sys.exit(1)
                 os.chmod(launch_script, 0o755)
+                os.execv(str(launch_script), [str(launch_script)])
 
-                process = subprocess.Popen(
-                    [launch_script],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
+        elif choice == '4':
+            monitor_script = script_dir / "monitor.sh"
+            if not monitor_script.exists():
+                print(f"{Colors.RED}❌ monitor.sh not found!{Colors.NC}")
+                sys.exit(1)
+            os.chmod(monitor_script, 0o755)
+            os.system(str(monitor_script))
 
-                while True:
-                    output = process.stdout.readline()
-                    if output:
-                        print(output.strip())
-                    if process.poll() is not None:
-                        break
+        elif choice == '5':
+            cleanup_script = script_dir / "cleanup.sh"
+            if not cleanup_script.exists():
+                print(f"{Colors.RED}❌ cleanup.sh not found!{Colors.NC}")
+                sys.exit(1)
+            os.chmod(cleanup_script, 0o755)
+            os.execv(str(cleanup_script), [str(cleanup_script)])
 
-                if process.returncode == 0:
-                    print("✅ bolt.diy launched successfully!")
-                    return True
-                else:
-                    print("❌ Failed to launch bolt.diy!")
-                    return False
-            except Exception as e:
-                print(f"Launch error: {str(e)}")
-                return False
+        elif choice == '6':
+            print(f"\n{Colors.GREEN}Peace out! ✌️{Colors.NC}")
+            sys.exit(0)
 
-        elif task_id == 'shell_check':
-            return self.detect_shell()
-
-        elif task_id == 'node_check':
-            return self.check_node()
-
-        return True
-
-    except Exception as e:
-        print(f"Error in {task_id}: {str(e)}")
-        return False
-
-def detect_shell(self):
-    shell = os.environ.get('SHELL', '')
-    if 'zsh' in shell:
-        self.shell_config = '~/.zshrc'
-    elif 'bash' in shell:
-        self.shell_config = '~/.bashrc'
-    else:
-        self.shell_config = '~/.profile'
-    return True
-
-def check_node(self):
-    try:
-        subprocess.run(['node', '-v'], check=True)
-        return True
-    except:
-        return self.install_node()
-
-def install_node(self):
-    try:
-        subprocess.run(['sudo', 'apt-get', 'update'], check=True)
-        subprocess.run(['sudo', 'apt-get', 'install', 'nodejs', 'npm', '-y'], check=True)
-        return True
-    except:
-        return False
+        else:
+            print(f"{Colors.RED}Invalid choice my guy. Try again.{Colors.NC}")
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = BoltLauncherGUI(root)
-    root.mainloop()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n\n{Colors.YELLOW}Aight, I'm out! ✌️{Colors.NC}")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n{Colors.RED}Shit broke: {str(e)}{Colors.NC}")
+        sys.exit(1)

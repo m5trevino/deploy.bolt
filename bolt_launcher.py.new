@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+import os
+import sys
+from pathlib import Path
+
+# Colors for that clean output
+class Colors:
+    CYAN = '\033[0;36m'
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    RED = '\033[0;31m'
+    PURPLE = '\033[0;35m'
+    BOLD = '\033[1m'
+    NC = '\033[0m'  # No Color
+
+def print_banner():
+    print(f"{Colors.PURPLE}")
+    print("""
+    🔥 BOLT.DIY LAUNCHER 🔥
+    ████╗  ████╗ ██╗  ████╗
+    ██╔══██╗██╔═══██╗██║  ╚══██╔══╝
+    ████╔╝██║   ██║██║     ██║
+    ██╔══██╗██║   ██║██║     ██║
+    ████╔╝╚████╔╝████╗   ██║
+    ╚════╝  ╚════╝ ╚════╝   ╚═╝
+    """)
+    print(f"{Colors.NC}")
+
+def clear_screen():
+    os.system('clear' if os.name == 'posix' else 'cls')
+
+def get_script_dir():
+    return Path(__file__).parent.absolute()
+
+def main():
+    clear_screen()
+    print_banner()
+
+    print(f"{Colors.CYAN}Select your move:{Colors.NC}")
+    print(f"{Colors.YELLOW}1. {Colors.NC}Set up new bolt.diy installation")
+    print(f"{Colors.YELLOW}2. {Colors.NC}Add new LLM to existing setup")
+    print(f"{Colors.YELLOW}3. {Colors.NC}Exit")
+
+    while True:
+        choice = input(f"\n{Colors.GREEN}Your choice (1-3): {Colors.NC}").strip()
+
+        script_dir = get_script_dir()
+
+        if choice == '1':
+            setup_script = script_dir / "setup_environment.sh"
+            if not setup_script.exists():
+                print(f"{Colors.RED}❌ setup_environment.sh not found!{Colors.NC}")
+                sys.exit(1)
+            os.chmod(setup_script, 0o755)
+            os.execv(str(setup_script), [str(setup_script)])
+
+        elif choice == '2':
+            custom_script = script_dir / "bolt_custom.sh"
+            if not custom_script.exists():
+                print(f"{Colors.RED}❌ bolt_custom.sh not found!{Colors.NC}")
+                sys.exit(1)
+            os.chmod(custom_script, 0o755)
+            os.execv(str(custom_script), [str(custom_script)])
+
+        elif choice == '3':
+            print(f"\n{Colors.GREEN}Peace out! ✌️{Colors.NC}")
+            sys.exit(0)
+
+        else:
+            print(f"{Colors.RED}Invalid choice my guy. Try again.{Colors.NC}")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n\n{Colors.YELLOW}Aight, I'm out! ✌️{Colors.NC}")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n{Colors.RED}Shit broke: {str(e)}{Colors.NC}")
+        sys.exit(1)

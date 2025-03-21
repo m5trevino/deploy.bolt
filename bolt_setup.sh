@@ -1,320 +1,94 @@
 #!/bin/bash
 
-# Colors for output
+# Colors
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
-PURPLE='\033[0;35m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${PURPLE}${BOLD}Setting up bolt.diy...${NC}"
+echo -e "${CYAN}🔧 Setting up bolt.diy...${NC}"
 
-# Detect installation directory
-if [ -d "/workspace/llm-server" ]; then
-    INSTALL_DIR="/workspace/llm-server"
-elif [ -d "$HOME/llm-server" ]; then
-    INSTALL_DIR="$HOME/llm-server"
-else
-    echo -e "${CYAN}Enter your installation directory:${NC}"
-    read -r INSTALL_DIR
-fi
+# Move to bolt.diy directory
+cd ~/bolt.diy || exit 1
 
-# Create LLM configs directory
-LLM_CONFIG_DIR="${INSTALL_DIR}/llm-configs"
-mkdir -p "$LLM_CONFIG_DIR"
+# Create provider file
+mkdir -p app/lib/modules/llm/providers
+cat > app/lib/modules/llm/providers/mistral-7b-v0.1-gguf-local.ts << 'TSEOF'
+import { BaseProvider, getOpenAILikeModel } from '../base-provider';
+import type { ModelInfo } from '../types';
+import type { IProviderSetting } from '~/types/model';
+import type { LanguageModelV1 } from 'ai';
+import { logger } from '~/utils/logger';
 
-# Check if we're running as root
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${YELLOW}Not running as root, will use local installations where possible${NC}"
-    SUDO=""
-    BOLT_DIR="$HOME/bolt.diy"
-    NPM_DIR="$HOME/.npm-global"
-    mkdir -p "$NPM_DIR"
-    npm config set prefix "$NPM_DIR"
-    export PATH="$NPM_DIR/bin:$PATH"
-else
-    SUDO="sudo"
-    BOLT_DIR="/root/bolt.diy"
-fi
-
-# Function to store LLM config
-store_llm_config() {
-    local name="$1"
-    cat > "${LLM_CONFIG_DIR}/${name}.conf" << EOF
-LLM_NAME="${name}"
-MODEL_ID="${model_id}"
-DISPLAY_NAME="${display_name}"
-PROVIDER_NAME="${provider_name}"
-MAX_TOKENS="${max_tokens}"
-CONTEXT_WINDOW="${context_window}"
-BASE_URL="${base_url}"
-API_KEY="${api_key}"
-QUANTIZATION="${quantization}"
-MODEL_PATH="${model_path}"
-EOF
-    chmod 600 "${LLM_CONFIG_DIR}/${name}.conf"
-}
-
-# Function to load existing LLM configs
-load_llm_configs() {
-    echo -e "${CYAN}Available LLM configurations:${NC}"
-    local count=1
-    for conf in "${LLM_CONFIG_DIR}"/*.conf; do
-        if [ -f "$conf" ]; then
-            source "$conf"
-            echo -e "${count}) ${YELLOW}${DISPLAY_NAME}${NC}"
-            echo -e "   Model: ${model_id}"
-            echo -e "   Path: ${model_path}"
-            echo -e "   Quantization: ${quantization}"
-            echo -e "   Context: ${context_window} tokens"
-            echo -e ""
-            ((count++))
-        fi
-    done
-}
-
-# Function to create new LLM config
-create_new_llm() {
-    echo -e "${CYAN}Enter LLM details:${NC}"
-    
-    echo -e "${YELLOW}Enter model name (e.g., mistral-7b):${NC}"
-    read -r model_id
-    
-    echo -e "${YELLOW}Enter display name (e.g., Mistral 7B):${NC}"
-    read -r display_name
-    
-    echo -e "${YELLOW}Enter provider name (e.g., MistralLocal):${NC}"
-    read -r provider_name
-    
-    echo -e "${YELLOW}Enter model path (e.g., /path/to/model or HF repo):${NC}"
-    read -r model_path
-    
-    echo -e "${YELLOW}Choose quantization:${NC}"
-    echo "1) 4-bit (Fastest, lowest VRAM)"
-    echo "2) 8-bit (Balance of speed and quality)"
-    echo "3) 16-bit (Best quality, needs most VRAM)"
-    read -r quant_choice
-    case $quant_choice in
-        1) quantization="4-bit" ;;
-        2) quantization="8-bit" ;;
-        3) quantization="16-bit" ;;
-        *) quantization="4-bit" ;;
-    esac
-    
-    echo -e "${YELLOW}Enter max tokens (default: 8192):${NC}"
-    read -r max_tokens
-    max_tokens=${max_tokens:-8192}
-    
-    echo -e "${YELLOW}Enter context window (default: 8192):${NC}"
-    read -r context_window
-    context_window=${context_window:-8192}
-    
-    echo -e "${YELLOW}Enter base URL (default: http://localhost:8000/v1):${NC}"
-    read -r base_url
-    base_url=${base_url:-"http://localhost:8000/v1"}
-    
-    echo -e "${YELLOW}Enter API key (or press enter for none):${NC}"
-    read -r api_key
-    api_key=${api_key:-"sk-1234567890"}
-    
-    # Store the config
-    store_llm_config "${model_id}"
-    
-    echo -e "${GREEN}LLM configuration saved!${NC}"
-}
-
-# Main menu for LLM selection
-llm_menu() {
-    while true; do
-        echo -e "\n${PURPLE}${BOLD}LLM Configuration Menu${NC}"
-        echo -e "1) Use existing LLM config"
-        echo -e "2) Create new LLM config"
-        echo -e "3) Continue with default (CodeLlama)"
-        echo -e "4) Exit"
-        read -r choice
-
-        case $choice in
-            1)
-                if [ -n "$(ls -A "$LLM_CONFIG_DIR" 2>/dev/null)" ]; then
-                    load_llm_configs
-                    echo -e "${YELLOW}Select LLM number:${NC}"
-                    read -r llm_choice
-                    # Load the selected config
-                    local count=1
-                    for conf in "${LLM_CONFIG_DIR}"/*.conf; do
-                        if [ -f "$conf" ] && [ $count -eq $llm_choice ]; then
-                            source "$conf"
-                            break
-                        fi
-                        ((count++))
-                    done
-                else
-                    echo -e "${RED}No LLM configs found. Creating new one...${NC}"
-                    create_new_llm
-                fi
-                break
-                ;;
-            2)
-                create_new_llm
-                break
-                ;;
-            3)
-                # Use default CodeLlama config
-                model_id="codellama-7b-instruct"
-                display_name="CodeLlama 7B Local"
-                provider_name="CodeLlamaLocal"
-                max_tokens=8192
-                context_window=8192
-                base_url="http://localhost:8000/v1"
-                api_key="sk-1234567890"
-                quantization="4-bit"
-                model_path="codellama/CodeLlama-7b-Instruct-hf"
-                store_llm_config "codellama-7b"
-                break
-                ;;
-            4)
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}Invalid choice${NC}"
-                ;;
-        esac
-    done
-}
-
-# Function to install system packages
-install_system_packages() {
-    echo -e "${YELLOW}Installing required system packages...${NC}"
-    if command -v apt-get &> /dev/null; then
-        $SUDO apt-get update
-        $SUDO apt-get install -y nodejs npm git curl build-essential
-    elif command -v yum &> /dev/null; then
-        $SUDO yum update -y
-        $SUDO yum install -y nodejs npm git curl gcc gcc-c++ make
-    elif command -v pacman &> /dev/null; then
-        $SUDO pacman -Syu --noconfirm
-        $SUDO pacman -S --noconfirm nodejs npm git base-devel
-    else
-        echo -e "${RED}Unsupported package manager. Please install nodejs, npm, and git manually.${NC}"
-        exit 1
-    fi
-}
-
-# Install required packages
-install_system_packages
-
-# Install NVM
-echo -e "${YELLOW}Installing Node Version Manager...${NC}"
-if [ ! -d "$HOME/.nvm" ]; then
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
-    export NVM_DIR="$HOME/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-    
-    # Add NVM to shell rc file
-    RC_FILE="$HOME/.bashrc"
-    if [ -f "$HOME/.zshrc" ]; then
-        RC_FILE="$HOME/.zshrc"
-    fi
-    
-    # Add NVM to RC file if not already there
-    if ! grep -q "NVM_DIR" "$RC_FILE"; then
-        cat >> "$RC_FILE" << 'EOF'
-
-# NVM Configuration
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-EOF
-    fi
-    
-    echo -e "${GREEN}NVM installed${NC}"
-else
-    echo -e "${YELLOW}NVM already installed${NC}"
-fi
-
-# Install Node.js LTS
-echo -e "${YELLOW}Installing Node.js LTS...${NC}"
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-nvm install --lts
-nvm use --lts
-echo -e "${GREEN}Node.js $(node -v) installed${NC}"
-
-# Install PNPM
-echo -e "${YELLOW}Installing PNPM...${NC}"
-if ! command -v pnpm &> /dev/null; then
-    # Use standalone installation if not root
-    if [ "$EUID" -ne 0 ]; then
-        curl -fsSL https://get.pnpm.io/install.sh | env PNPM_HOME="$HOME/.local/share/pnpm" sh -
-        export PNPM_HOME="$HOME/.local/share/pnpm"
-        export PATH="$PNPM_HOME:$PATH"
+export default class TheBlokeProvider extends BaseProvider {
+    name = 'TheBloke';
+    displayName = 'Mistral';
+    getApiKeyLink = 'http://localhost:8000';
+    labelForGetApiKey = 'Local Server';
+    icon = 'i-carbon-machine-learning-model';
+    requiresApiKey = false;
+    config = {
+        baseUrlKey: 'THEBLOKE_API_BASE_URL',
+        apiTokenKey: 'THEBLOKE_API_KEY',
+        baseUrl: 'http://localhost:8000',
+        modelPath: 'TheBloke/Mistral-7B-v0.1-GGUF',
+        quantization: '4-bit'
+    };
+    staticModels: ModelInfo[] = [
+        { 
+            name: 'mistral-7b-v0.1-gguf', 
+            label: 'Mistral', 
+            provider: 'TheBloke', 
+            maxTokenAllowed: 8192,
+            contextWindow: 8192,
+            pricing: { prompt: 0, completion: 0 }
+        }
+    ];
+    getModelInstance(options: {
+        model: string;
+        serverEnv?: Record<string, string>;
+        apiKeys?: Record<string, string>;
+        providerSettings?: Record<string, IProviderSetting>;
+    }): LanguageModelV1 {
+        const { model } = options;
+        const { baseUrl, apiKey } = this.getProviderBaseUrlAndKey({
+            apiKeys: options.apiKeys,
+            providerSettings: options.providerSettings?.[this.name],
+            serverEnv: options.serverEnv,
+            defaultBaseUrlKey: this.config.baseUrlKey,
+            defaultApiTokenKey: this.config.apiTokenKey
+        });
+        const finalBaseUrl = baseUrl || this.config.baseUrl;
+        const finalApiKey = apiKey || 'sk-1234567890';
         
-        # Add PNPM to shell rc file
-        if ! grep -q "PNPM_HOME" "$RC_FILE"; then
-            cat >> "$RC_FILE" << EOF
+        logger.debug('TheBloke Provider:', { 
+            baseUrl: finalBaseUrl, 
+            model,
+            modelPath: this.config.modelPath,
+            quantization: this.config.quantization
+        });
+        return getOpenAILikeModel(finalBaseUrl, finalApiKey, model);
+    }
+}
+TSEOF
 
-# PNPM Configuration
-export PNPM_HOME="$HOME/.local/share/pnpm"
-export PATH="\$PNPM_HOME:\$PATH"
-EOF
-        fi
-    else
-        curl -fsSL https://get.pnpm.io/install.sh | sh -
-        export PNPM_HOME="/root/.local/share/pnpm"
-        export PATH="$PNPM_HOME:$PATH"
-    fi
-    echo -e "${GREEN}PNPM installed${NC}"
-else
-    echo -e "${YELLOW}PNPM already installed${NC}"
-fi
+# Update registry
+cat > app/lib/modules/llm/registry.ts << 'TSEOF'
+import TheBlokeLocalProvider from './providers/mistral-7b-v0.1-gguf-local';
 
-# Clone bolt.diy if it doesn't exist
-if [ ! -d "$BOLT_DIR" ]; then
-    echo -e "${YELLOW}Cloning bolt.diy repository...${NC}"
-    git clone -b stable https://github.com/stackblitz-labs/bolt.diy.git "$BOLT_DIR"
-    echo -e "${GREEN}bolt.diy cloned successfully${NC}"
-else
-    echo -e "${YELLOW}bolt.diy already exists, checking for updates...${NC}"
-    cd "$BOLT_DIR"
-    git pull origin stable
-fi
+export {
+    TheBlokeLocalProvider,
+};
+TSEOF
 
-# Run LLM menu before installing dependencies
-echo -e "\n${CYAN}Setting up LLM configuration...${NC}"
-llm_menu
+echo -e "${GREEN}✅ Created provider files${NC}"
 
-# Install bolt.diy dependencies
-echo -e "${YELLOW}Installing bolt.diy dependencies...${NC}"
-cd "$BOLT_DIR"
+# Build bolt.diy
+echo -e "${CYAN}Building bolt.diy...${NC}"
+pnpm build
 
-# Try to use PNPM first, fallback to NPM
-if command -v pnpm &> /dev/null; then
-    pnpm install
-else
-    npm install
-fi
-
-echo -e "\n${GREEN}bolt.diy setup completed!${NC}"
-echo -e "${CYAN}Installation Details:${NC}"
-echo -e "  ${YELLOW}Installation Directory: ${INSTALL_DIR}${NC}"
-echo -e "  ${YELLOW}Bolt.DIY Directory: ${BOLT_DIR}${NC}"
-echo -e "  ${YELLOW}LLM Configs: ${LLM_CONFIG_DIR}${NC}"
-echo -e "  ${YELLOW}Node Version: $(node -v)${NC}"
-echo -e "  ${YELLOW}NPM Version: $(npm -v)${NC}"
-if command -v pnpm &> /dev/null; then
-    echo -e "  ${YELLOW}PNPM Version: $(pnpm -v)${NC}"
-fi
-
-echo -e "\n${CYAN}Selected LLM Configuration:${NC}"
-echo -e "  ${YELLOW}Model: ${display_name}${NC}"
-echo -e "  ${YELLOW}Path: ${model_path}${NC}"
-echo -e "  ${YELLOW}Quantization: ${quantization}${NC}"
-echo -e "  ${YELLOW}Context Window: ${context_window} tokens${NC}"
-
-echo -e "\n${CYAN}Next Steps:${NC}"
-echo -e "1. Run ${YELLOW}cd ${BOLT_DIR}${NC}"
-echo -e "2. Start the server with ${YELLOW}pnpm dev${NC} or ${YELLOW}npm run dev${NC}"
-echo -e "3. Access bolt.diy at ${YELLOW}http://localhost:5173${NC}"
+# Hand off to configure script
+echo -e "${CYAN}Moving to final configuration...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/configure.sh"
+exec "${SCRIPT_DIR}/configure.sh"

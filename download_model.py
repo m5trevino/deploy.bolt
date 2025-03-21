@@ -94,4 +94,18 @@ def download_model():
         return 1
 
 if __name__ == "__main__":
-    sys.exit(download_model())
+    try:
+        exit_code = download_model()
+        if exit_code == 0:
+            print("\n✅ Model download complete!")
+            print("Starting server...")
+            
+            script_dir = Path(__file__).parent.absolute()
+            server_script = script_dir / "server.sh"
+            os.chmod(server_script, 0o755)
+            os.execv(str(server_script), [str(server_script)])
+        else:
+            sys.exit(exit_code)
+    except Exception as e:
+        print(f"\n❌ Download failed: {str(e)}")
+        sys.exit(1)

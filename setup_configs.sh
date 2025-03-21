@@ -1,122 +1,40 @@
 #!/bin/bash
 
 # Colors
-CYAN='\033[0;36m'
 GREEN='\033[0;32m'
-PURPLE='\033[0;35m'
-YELLOW='\033[1;33m'
 RED='\033[0;31m'
-BOLD='\033[1m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Dope ASCII Art
-echo -e "${PURPLE}"
-cat << "EOF"
-🔥 LLM CONFIG SETUP 🔥
-█▀▀ █▀█ █▄░█ █▀▀ █ █▀▀   █▀ █▀▀ ▀█▀ █░█ █▀█
-█▄▄ █▄█ █░▀█ █▀░ █ █▄█   ▄█ ██▄ ░█░ █▄█ █▀▀
-EOF
-echo -e "${NC}"
+echo -e "${CYAN}⚙️ Setting up configurations...${NC}"
 
-# Function to print section header
-print_header() {
-    echo -e "\n${PURPLE}${BOLD}[+] $1 ${NC}\n"
-}
+# Setup bolt.diy configs
+cd ~/bolt.diy || exit 1
 
-# Function to print step
-print_step() {
-    echo -e "${CYAN}[*] $1${NC}"
-}
+# Install dependencies
+echo -e "${CYAN}Installing bolt.diy dependencies...${NC}"
+pnpm install
 
-# Function to print success
-print_success() {
-    echo -e "${GREEN}[✓] $1${NC}"
-}
+# Create .env.local if it doesn't exist
+if [ ! -f .env.local ]; then
+    cat > .env.local << 'ENVEOF'
+THEBLOKE_API_BASE_URL=http://localhost:8000
+THEBLOKE_API_KEY=sk-1234567890
+OPENAI_LIKE_API_BASE_URL=http://localhost:8000
+VITE_LOG_LEVEL=debug
+DEFAULT_NUM_CTX=8192
+VITE_DEFAULT_SYSTEM_PROMPT="You are a helpful AI assistant."
+INSTALL_DIR=/home/flintx/llm-server
+BOLT_DIR=/home/flintx/bolt.diy
+MODELS_DIR=/home/flintx/models
+PORT=3000
+HOST=0.0.0.0
+ENVEOF
+    echo -e "${GREEN}✅ Created .env.local${NC}"
+fi
 
-# Function to print error
-print_error() {
-    echo -e "${RED}[✗] $1${NC}"
-    exit 1
-}
-
-# Function to verify existing setup
-verify_setup() {
-    print_header "VERIFYING SETUP"
-    
-    # Check configs directory
-    if [ ! -d "configs/llm_configs" ]; then
-        print_error "Config directory not found!"
-    fi
-    
-    # Check providers directory
-    if [ ! -d "providers" ]; then
-        print_error "Providers directory not found!"
-    fi
-    
-    # Check provider files
-    if [ ! -f "providers/codellama-local.ts" ] || \
-       [ ! -f "providers/deepseek-local.ts" ] || \
-       [ ! -f "providers/openai-like-ts" ]; then
-        print_error "Provider files missing!"
-    fi
-    
-    print_success "Directory structure verified"
-}
-
-# Function to select active model
-select_active_model() {
-    print_header "SELECT ACTIVE MODEL"
-    
-    # List available models
-    echo -e "${CYAN}Available models:${NC}"
-    PS3="Select model: "
-    options=($(ls configs/llm_configs/*.json | xargs -n 1 basename))
-    select opt in "${options[@]}"; do
-        if [ -n "$opt" ]; then
-            # Create/update symlink
-            ln -sf "llm_configs/$opt" configs/active_model.json
-            print_success "Active model set to: $opt"
-            break
-        else
-            echo -e "${RED}Invalid choice${NC}"
-        fi
-    done
-}
-
-# Function to show setup summary
-show_summary() {
-    print_header "SETUP SUMMARY"
-    
-    # Get active model
-    ACTIVE_MODEL=$(basename "$(readlink -f configs/active_model.json)" .json)
-    
-    echo -e "${YELLOW}Config Directory:${NC} configs/llm_configs/"
-    echo -e "${YELLOW}Available Models:${NC}"
-    for config in configs/llm_configs/*.json; do
-        name=$(jq -r '.name' "$config")
-        provider=$(jq -r '.provider' "$config")
-        echo -e "  - $name (${CYAN}$provider${NC})"
-    done
-    echo -e "${YELLOW}Active Model:${NC} ${GREEN}$ACTIVE_MODEL${NC}"
-    echo -e "${YELLOW}Provider Files:${NC} providers/"
-    
-    echo -e "\n${GREEN}Setup complete! Ready to run server.sh! 🚀${NC}"
-}
-
-# Main execution
-print_header "MANAGING LLM CONFIGS"
-
-# Verify existing setup
-verify_setup
-
-# Select active model
-select_active_model
-
-# Show summary
-show_summary
-
-# Final instructions
-echo -e "\n${CYAN}Next steps:${NC}"
-echo -e "1. Run ${GREEN}./server.sh${NC} to start the server"
-echo -e "2. Run ${GREEN}./expose.sh${NC} to expose it to the internet (optional)"
-echo -e "3. To change models later, just run ${GREEN}./setup_configs.sh${NC} again"
+# Hand off to server setup
+echo -e "${CYAN}Moving to server setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/server_setup.sh"
+exec "${SCRIPT_DIR}/server_setup.sh"

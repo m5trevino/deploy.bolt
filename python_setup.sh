@@ -1,159 +1,38 @@
 #!/bin/bash
 
-# Colors for output
+# Colors
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
-PURPLE='\033[0;35m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${PURPLE}${BOLD}🐍 Setting up Python environment for LLM Server...${NC}"
+echo -e "${CYAN}🐍 Setting up Python environment...${NC}"
 
-# Check if running as root or with sudo
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}Ay fam, run this shit with sudo!${NC}"
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install required packages
+echo -e "${CYAN}Installing Python packages...${NC}"
+pip install --upgrade pip
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install fastapi uvicorn huggingface_hub transformers
+
+# Save venv path for later
+echo "BOLT_VENV=$(pwd)/venv" > ~/.bolt_venvs.conf
+
+# Test imports
+echo -e "${CYAN}Testing Python setup...${NC}"
+python3 -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Python setup failed!${NC}"
     exit 1
 fi
 
-# Check CUDA availability
-check_cuda() {
-    if nvidia-smi &>/dev/null; then
-        CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | cut -d'.' -f1)
-        echo -e "${GREEN}Found CUDA Version: $CUDA_VERSION${NC}"
-        return 0
-    else
-        echo -e "${YELLOW}No CUDA GPU found - Setting up for CPU only${NC}"
-        return 1
-    fi
-}
+echo -e "${GREEN}✅ Python environment ready!${NC}"
 
-# Install system dependencies
-echo -e "${CYAN}Installing system dependencies...${NC}"
-apt-get update && apt-get install -y \
-    python3.10-venv \
-    python3-pip \
-    git \
-    wget \
-    curl \
-    build-essential \
-    nvidia-cuda-toolkit \
-    || { echo -e "${RED}Failed to install system dependencies${NC}"; exit 1; }
-
-# Create and setup virtual environment
-REPO_DIR=$(pwd)
-cd "$REPO_DIR"
-
-echo -e "${CYAN}Setting up Python virtual environment...${NC}"
-python3.10 -m pip install --user virtualenv
-
-if [ ! -d "venv" ]; then
-    python3.10 -m virtualenv venv
-else
-    echo -e "${YELLOW}Cleaning existing venv...${NC}"
-    rm -rf venv
-    python3.10 -m virtualenv venv
-fi
-
-source venv/bin/activate
-python -m pip install --upgrade pip
-
-# Create api-server directory
-mkdir -p "${REPO_DIR}/api-server"
-
-# Write requirements based on CUDA availability
-echo -e "${CYAN}Creating requirements.txt with latest versions...${NC}"
-cat > "${REPO_DIR}/api-server/requirements.txt" << 'EOF'
-# Core dependencies
-fastapi==0.104.1
-uvicorn==0.23.2
-pydantic==2.4.2
-numpy==1.26.2
-requests==2.31.0
-tqdm==4.66.1
-
-# ML/DL frameworks
-transformers==4.35.2
-tokenizers==0.15.0
-accelerate==0.24.1
-bitsandbytes==0.41.1
-sentencepiece==0.1.99
-einops==0.7.0
-safetensors==0.4.0
-
-# Text processing
-regex==2023.10.3
-ftfy==6.1.1
-markdown==3.5.1
-
-# Optimization
-optimum==1.14.1
-auto-gptq==0.5.0
-exllama==0.1.0
-
-# Utilities
-psutil==5.9.6
-py-cpuinfo==9.0.0
-EOF
-
-# Install PyTorch based on CUDA availability
-if check_cuda; then
-    echo -e "${CYAN}Installing PyTorch with CUDA support...${NC}"
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-else
-    echo -e "${CYAN}Installing PyTorch CPU version...${NC}"
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-fi
-
-# Install other requirements
-echo -e "${CYAN}Installing other requirements...${NC}"
-pip install -r "${REPO_DIR}/api-server/requirements.txt"
-
-# Install flash-attention if CUDA is available
-if check_cuda; then
-    echo -e "${CYAN}Installing flash-attention...${NC}"
-    pip install flash-attn --no-build-isolation
-fi
-
-# Create directories for models and configs
-mkdir -p "${REPO_DIR}/models"
-mkdir -p "${REPO_DIR}/configs"
-
-# Verify installation
-echo -e "${CYAN}Verifying installation...${NC}"
-python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
-python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Python environment setup completed successfully!${NC}"
-else
-    echo -e "${RED}❌ Some verifications failed${NC}"
-fi
-
-# Create a test script to verify LLM dependencies
-cat > "${REPO_DIR}/api-server/test_setup.py" << 'EOF'
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import bitsandbytes as bnb
-import accelerate
-import safetensors
-
-def test_setup():
-    print(f"PyTorch version: {torch.__version__}")
-    print(f"CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA device: {torch.cuda.get_device_name(0)}")
-        print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-    print(f"bitsandbytes version: {bnb.__version__}")
-    print(f"accelerate version: {accelerate.__version__}")
-    print("All critical dependencies verified!")
-
-if __name__ == "__main__":
-    test_setup()
-EOF
-
-echo -e "${CYAN}Running setup verification...${NC}"
-python "${REPO_DIR}/api-server/test_setup.py"
-
-echo -e "${GREEN}${BOLD}🚀 LLM Server Python Environment Ready!${NC}"
-echo -e "${YELLOW}To activate this environment later, run: source venv/bin/activate${NC}"
+# Hand off to config setup
+echo -e "${CYAN}Moving to config setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/setup_configs.sh"
+exec "${SCRIPT_DIR}/setup_configs.sh"

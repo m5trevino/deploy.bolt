@@ -1,0 +1,12 @@
+
+print_header "HANDING OFF TO PYTHON SETUP"
+echo -e "${CYAN}Base setup done! Moving to Python setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/python_setup.sh"
+exec "${SCRIPT_DIR}/python_setup.sh"
+
+print_header "HANDING OFF TO PYTHON SETUP"
+echo -e "${CYAN}Base setup done! Moving to Python setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/python_setup.sh"
+exec "${SCRIPT_DIR}/python_setup.sh"

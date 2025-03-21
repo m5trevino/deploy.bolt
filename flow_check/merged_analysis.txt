@@ -1,0 +1,2558 @@
+
+
+### Content of bolt_launcher.py ###
+
+#!/usr/bin/env python3
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import subprocess
+import os
+import time
+import json
+import sys
+from pathlib import Path
+
+def get_bolt_directory():
+    print("\n🔍 Detecting bolt.diy location...")
+
+    # Common locations to check
+    possible_dirs = [
+        "/home/flintx/bolt.diy",
+        "/root/bolt.diy",
+        os.path.expanduser("~/bolt.diy")
+    ]
+
+    print("\nPossible bolt.diy locations:")
+    for i, dir in enumerate(possible_dirs, 1):
+        status = "✅ exists" if os.path.exists(dir) else "❌ not found"
+        print(f"{i}. {dir} ({status})")
+
+    print("\nSelect bolt.diy directory:")
+    print("1-3: Use one of the above locations")
+    print("4: Enter custom path")
+
+    choice = input("\nYour choice (1-4): ").strip()
+
+    if choice in ['1', '2', '3']:
+        bolt_dir = possible_dirs[int(choice)-1]
+    else:
+        bolt_dir = input("\nEnter full path to bolt.diy directory: ").strip()
+
+    # Verify directory
+    if not os.path.exists(bolt_dir):
+        create = input(f"\n{bolt_dir} doesn't exist. Create it? (y/n): ").lower()
+        if create == 'y':
+            os.makedirs(bolt_dir, exist_ok=True)
+            print(f"Created {bolt_dir}")
+        else:
+            return None
+
+    print(f"\n✅ Using bolt.diy directory: {bolt_dir}")
+    return bolt_dir
+
+def setup_paths():
+    if os.path.exists("/home/flintx/llm-server"):
+        server_dir = "/home/flintx/llm-server"
+    else:
+        server_dir = os.path.expanduser("~/llm-server")
+
+    config_dirs = [
+        f"{server_dir}/configs",
+        f"{server_dir}/configs/llm_configs"
+    ]
+
+    for d in config_dirs:
+        os.makedirs(d, exist_ok=True)
+        os.chmod(d, 0o755)
+
+    return server_dir
+
+class TaskStatus:
+    PENDING = "🔴"
+    RUNNING = "🟡"
+    COMPLETE = "🟢"
+    FAILED = "❌"
+    class BoltLauncherGUI:
+        def __init__(self, root):
+            self.root = root
+        self.root.title("🔥 BOLT.DIY Launcher")
+        self.root.geometry("800x600")
+        self.root.configure(bg='#2e2e2e')
+
+        self.server_dir = setup_paths()
+
+        self.main_frame = tk.Frame(root, bg='#2e2e2e')
+        self.main_frame.pack(expand=True, fill='both', padx=20, pady=20)
+
+        self.show_main_menu()
+
+    def show_main_menu(self):
+        self.clear_frame()
+
+        ascii_art = """
+        🔥 BOLT.DIY LAUNCHER 🔥
+        ████╗  ████╗ ██╗  ████╗
+        ██╔══██╗██╔═══██╗██║  ╚══██╔══╝
+        ████╔╝██║   ██║██║    ██║
+        ██╔══██╗██║   ██║██║    ██║
+        ████╔╝╚████╔╝████╗██║
+        ╚════╝  ╚════╝ ╚════╝╚═╝
+        """
+
+        title = tk.Label(self.main_frame, text=ascii_art,
+                        font=('Courier', 10), bg='#2e2e2e', fg='#00ff00')
+        title.pack(pady=20)
+
+        button_style = {
+            'width': 40,
+            'height': 2,
+            'bg': '#4e4e4e',
+            'fg': 'white',
+            'activebackground': '#5e5e5e',
+            'activeforeground': 'white',
+            'font': ('Helvetica', 10, 'bold')
+        }
+
+        tk.Button(self.main_frame,
+                 text="🆕 Setup New Bolt.DIY Installation",
+                 command=lambda: self.show_task_screen("new_setup"),
+                 **button_style).pack(pady=10)
+
+        tk.Button(self.main_frame,
+                 text="➕ Add New LLM to Existing Setup",
+                 command=lambda: self.show_task_screen("add_llm"),
+                 **button_style).pack(pady=10)
+
+    def clear_frame(self):
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+            def show_task_screen(self, mode):
+                self.clear_frame()
+
+    header_text = "🆕 New Installation Setup" if mode == "new_setup" else "➕ Adding New LLM"
+    tk.Label(self.main_frame, text=header_text,
+            font=('Helvetica', 14, 'bold'),
+            bg='#2e2e2e', fg='#00ff00').pack(pady=10)
+
+    canvas = tk.Canvas(self.main_frame, bg='#2e2e2e', highlightthickness=0)
+    scrollbar = ttk.Scrollbar(self.main_frame, orient="vertical", command=canvas.yview)
+    scrollable_frame = tk.Frame(canvas, bg='#2e2e2e')
+
+    scrollable_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+
+    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    tasks = self.get_tasks(mode)
+    self.task_labels = {}
+
+    for task in tasks:
+        frame = tk.Frame(scrollable_frame, bg='#2e2e2e')
+        frame.pack(fill='x', pady=5)
+
+        status_label = tk.Label(frame, text=TaskStatus.PENDING,
+                              font=('Helvetica', 12),
+                              bg='#2e2e2e', fg='white')
+        status_label.pack(side='left', padx=10)
+
+        task_label = tk.Label(frame, text=task['description'],
+                            font=('Helvetica', 10),
+                            bg='#2e2e2e', fg='white',
+                            anchor='w')
+        task_label.pack(side='left', fill='x', expand=True)
+
+        self.task_labels[task['id']] = {
+            'status': status_label,
+            'label': task_label
+        }
+
+    canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+    scrollbar.pack(side="right", fill="y")
+
+    tk.Button(self.main_frame,
+             text="🚀 Start Process",
+             command=lambda: self.start_tasks(mode, tasks),
+             bg='#4e4e4e',
+             fg='white',
+             font=('Helvetica', 12, 'bold')).pack(pady=20)
+
+def get_tasks(self, mode):
+    base_tasks = [
+        {'id': 'shell_check', 'description': 'Detecting shell environment...'},
+        {'id': 'node_check', 'description': 'Checking Node.js environment...'},
+        {'id': 'pnpm_check', 'description': 'Validating pnpm installation...'}
+    ]
+
+    if mode == "new_setup":
+        base_tasks.extend([
+            {'id': 'bolt_clone', 'description': 'Cloning bolt.diy repository...'},
+            {'id': 'bolt_deps', 'description': 'Installing dependencies...'},
+            {'id': 'bolt_setup', 'description': 'Setting up bolt.diy...'},
+            {'id': 'server_setup', 'description': 'Configuring server...'}
+        ])
+
+    base_tasks.extend([
+        {'id': 'llm_config', 'description': 'Configuring LLM...'},
+        {'id': 'model_download', 'description': 'Downloading model...'},  # Added this task
+        {'id': 'server_start', 'description': 'Starting LLM server...'},
+        {'id': 'ui_launch', 'description': 'Launching bolt.diy UI...'}
+    ])
+
+    return base_tasks
+    def update_task_status(self, task_id, status):
+        if task_id in self.task_labels:
+            self.task_labels[task_id]['status'].config(text=status)
+            self.root.update()
+
+    def start_tasks(self, mode, tasks):
+        for task in tasks:
+            self.update_task_status(task['id'], TaskStatus.RUNNING)
+            success = self.execute_task(mode, task['id'])
+
+        if success:
+            self.update_task_status(task['id'], TaskStatus.COMPLETE)
+        else:
+            self.update_task_status(task['id'], TaskStatus.FAILED)
+            messagebox.showerror("Error", f"Failed at: {task['description']}")
+            return
+
+    messagebox.showinfo("Success", "🎉 All tasks completed successfully!")
+    self.show_main_menu()
+
+def execute_task(self, mode, task_id):
+    try:
+        if task_id == 'llm_config':
+            print("🔥 BOLT.DIY LLM ADDER 🔥")
+
+            # Get bolt.diy directory first
+            bolt_dir = get_bolt_directory()
+            if not bolt_dir:
+                print("❌ No valid bolt.diy directory selected!")
+                return False
+
+            print("\n📝 Enter LLM details:")
+            llm_name = input("Enter LLM name (e.g., mixtral-8x7b): ")
+            provider_name = input("Enter provider name (e.g., mistralai): ")
+            display_name = input("Enter display name (e.g., Mixtral): ")
+            model_path = input("Enter model path (HF repo or local): ")
+            vram_gb = input("Enter VRAM required (GB): ")
+            max_tokens = input("Enter max tokens: ")
+
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            bolt_custom_path = os.path.join(script_dir, "bolt_custom.sh")
+
+            os.chmod(bolt_custom_path, 0o755)
+
+            # Pass VIRTUAL_ENV if we're in one
+            env = os.environ.copy()
+            if 'VIRTUAL_ENV' in os.environ:
+                env['VIRTUAL_ENV'] = os.environ['VIRTUAL_ENV']
+
+            # Run the script with input redirection to allow terminal input
+            process = subprocess.Popen([
+                bolt_custom_path,
+                '--bolt-dir', bolt_dir
+            ], stdin=subprocess.PIPE, stdout=None, stderr=None, text=True, env=env)
+
+            inputs = f"{llm_name}\n{provider_name}\n{display_name}\n{model_path}\n{vram_gb}\n{max_tokens}\n"
+            process.communicate(inputs)
+
+            if process.returncode == 0:
+                print("✅ LLM added successfully!")
+                return True
+            else:
+                print("❌ Failed to add LLM!")
+                return False
+
+        elif task_id == 'model_download':  # New task for model download
+            print("📥 Downloading model...")
+            try:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                download_script = os.path.join(script_dir, "download_model.py")
+
+                # Make sure the models directory exists
+                models_dir = os.path.expanduser("~/models")
+                os.makedirs(models_dir, exist_ok=True)
+
+                process = subprocess.Popen(
+                    [sys.executable, download_script],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    universal_newlines=True
+                )
+
+                # Monitor the download progress
+                while True:
+                    output = process.stdout.readline()
+                    if output:
+                        print(output.strip())
+                    if process.poll() is not None:
+                        break
+
+                if process.returncode == 0:
+                    print("✅ Model downloaded successfully!")
+                    return True
+                else:
+                    print("❌ Model download failed!")
+                    error_output = process.stderr.read()
+                    print(f"Error: {error_output}")
+                    return False
+
+            except Exception as e:
+                print(f"Download error: {str(e)}")
+                return False
+                elif task_id == 'server_start':
+            print("🚀 Setting up server...")
+            try:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                server_script = os.path.join(script_dir, "server.sh")
+                os.chmod(server_script, 0o755)
+
+                # Get the saved venv path from config
+                venv_config = os.path.expanduser("~/.bolt_venvs.conf")
+                if os.path.exists(venv_config):
+                    with open(venv_config, 'r') as f:
+                        first_line = f.readline().strip()
+                        if first_line:
+                            venv_name, venv_path = first_line.split(':')
+                            env = os.environ.copy()
+                            env['BOLT_VENV'] = venv_path
+                            print(f"Using saved venv: {venv_path}")
+                        else:
+                            print("❌ No venv configured in ~/.bolt_venvs.conf")
+                            return False
+                else:
+                    print("❌ No venv config found at ~/.bolt_venvs.conf")
+                    return False
+
+                # Start server in background with environment variable
+                process = subprocess.Popen(
+                    [server_script],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                    env=env
+                )
+
+                # Monitor the output
+                while True:
+                    output = process.stdout.readline()
+                    if output:
+                        print(output.strip())
+                        if "Server started successfully!" in output:
+                            return True
+                        if "failed to start" in output:
+                            return False
+                    if process.poll() is not None:
+                        break
+
+                if process.returncode == 0:
+                    print("✅ Server started successfully!")
+                    return True
+                else:
+                    print("❌ Server failed to start!")
+                    error_output = process.stderr.read()
+                    print(f"Error: {error_output}")
+                    return False
+
+            except Exception as e:
+                print(f"Server start error: {str(e)}")
+                return False
+
+        elif task_id == 'ui_launch':
+            print("🚀 Launching bolt.diy...")
+            try:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                launch_script = os.path.join(script_dir, "launch_bolt.sh")
+                os.chmod(launch_script, 0o755)
+
+                process = subprocess.Popen(
+                    [launch_script],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+
+                while True:
+                    output = process.stdout.readline()
+                    if output:
+                        print(output.strip())
+                    if process.poll() is not None:
+                        break
+
+                if process.returncode == 0:
+                    print("✅ bolt.diy launched successfully!")
+                    return True
+                else:
+                    print("❌ Failed to launch bolt.diy!")
+                    return False
+            except Exception as e:
+                print(f"Launch error: {str(e)}")
+                return False
+
+        elif task_id == 'shell_check':
+            return self.detect_shell()
+
+        elif task_id == 'node_check':
+            return self.check_node()
+
+        return True
+
+    except Exception as e:
+        print(f"Error in {task_id}: {str(e)}")
+        return False
+
+def detect_shell(self):
+    shell = os.environ.get('SHELL', '')
+    if 'zsh' in shell:
+        self.shell_config = '~/.zshrc'
+    elif 'bash' in shell:
+        self.shell_config = '~/.bashrc'
+    else:
+        self.shell_config = '~/.profile'
+    return True
+
+def check_node(self):
+    try:
+        subprocess.run(['node', '-v'], check=True)
+        return True
+    except:
+        return self.install_node()
+
+def install_node(self):
+    try:
+        subprocess.run(['sudo', 'apt-get', 'update'], check=True)
+        subprocess.run(['sudo', 'apt-get', 'install', 'nodejs', 'npm', '-y'], check=True)
+        return True
+    except:
+        return False
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = BoltLauncherGUI(root)
+    root.mainloop()
+
+### Content of setup_environment.sh ###
+
+
+print_header "HANDING OFF TO PYTHON SETUP"
+echo -e "${CYAN}Base setup done! Moving to Python setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/python_setup.sh"
+exec "${SCRIPT_DIR}/python_setup.sh"
+
+print_header "HANDING OFF TO PYTHON SETUP"
+echo -e "${CYAN}Base setup done! Moving to Python setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/python_setup.sh"
+exec "${SCRIPT_DIR}/python_setup.sh"
+
+
+### Content of python_setup.sh ###
+
+#!/bin/bash
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+echo -e "${PURPLE}${BOLD}🐍 Setting up Python environment for LLM Server...${NC}"
+
+# Check if running as root or with sudo
+if [ "$EUID" -ne 0 ]; then 
+    echo -e "${RED}Ay fam, run this shit with sudo!${NC}"
+    exit 1
+fi
+
+# Check CUDA availability
+check_cuda() {
+    if nvidia-smi &>/dev/null; then
+        CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | cut -d'.' -f1)
+        echo -e "${GREEN}Found CUDA Version: $CUDA_VERSION${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}No CUDA GPU found - Setting up for CPU only${NC}"
+        return 1
+    fi
+}
+
+# Install system dependencies
+echo -e "${CYAN}Installing system dependencies...${NC}"
+apt-get update && apt-get install -y \
+    python3.10-venv \
+    python3-pip \
+    git \
+    wget \
+    curl \
+    build-essential \
+    nvidia-cuda-toolkit \
+    || { echo -e "${RED}Failed to install system dependencies${NC}"; exit 1; }
+
+# Create and setup virtual environment
+REPO_DIR=$(pwd)
+cd "$REPO_DIR"
+
+echo -e "${CYAN}Setting up Python virtual environment...${NC}"
+python3.10 -m pip install --user virtualenv
+
+if [ ! -d "venv" ]; then
+    python3.10 -m virtualenv venv
+else
+    echo -e "${YELLOW}Cleaning existing venv...${NC}"
+    rm -rf venv
+    python3.10 -m virtualenv venv
+fi
+
+source venv/bin/activate
+python -m pip install --upgrade pip
+
+# Create api-server directory
+mkdir -p "${REPO_DIR}/api-server"
+
+# Write requirements based on CUDA availability
+echo -e "${CYAN}Creating requirements.txt with latest versions...${NC}"
+cat > "${REPO_DIR}/api-server/requirements.txt" << 'EOF'
+# Core dependencies
+fastapi==0.104.1
+uvicorn==0.23.2
+pydantic==2.4.2
+numpy==1.26.2
+requests==2.31.0
+tqdm==4.66.1
+
+# ML/DL frameworks
+transformers==4.35.2
+tokenizers==0.15.0
+accelerate==0.24.1
+bitsandbytes==0.41.1
+sentencepiece==0.1.99
+einops==0.7.0
+safetensors==0.4.0
+
+# Text processing
+regex==2023.10.3
+ftfy==6.1.1
+markdown==3.5.1
+
+# Optimization
+optimum==1.14.1
+auto-gptq==0.5.0
+exllama==0.1.0
+
+# Utilities
+psutil==5.9.6
+py-cpuinfo==9.0.0
+EOF
+
+# Install PyTorch based on CUDA availability
+if check_cuda; then
+    echo -e "${CYAN}Installing PyTorch with CUDA support...${NC}"
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+else
+    echo -e "${CYAN}Installing PyTorch CPU version...${NC}"
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+fi
+
+# Install other requirements
+echo -e "${CYAN}Installing other requirements...${NC}"
+pip install -r "${REPO_DIR}/api-server/requirements.txt"
+
+# Install flash-attention if CUDA is available
+if check_cuda; then
+    echo -e "${CYAN}Installing flash-attention...${NC}"
+    pip install flash-attn --no-build-isolation
+fi
+
+# Create directories for models and configs
+mkdir -p "${REPO_DIR}/models"
+mkdir -p "${REPO_DIR}/configs"
+
+# Verify installation
+echo -e "${CYAN}Verifying installation...${NC}"
+python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ Python environment setup completed successfully!${NC}"
+else
+    echo -e "${RED}❌ Some verifications failed${NC}"
+fi
+
+# Create a test script to verify LLM dependencies
+cat > "${REPO_DIR}/api-server/test_setup.py" << 'EOF'
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import bitsandbytes as bnb
+import accelerate
+import safetensors
+
+def test_setup():
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    print(f"bitsandbytes version: {bnb.__version__}")
+    print(f"accelerate version: {accelerate.__version__}")
+    print("All critical dependencies verified!")
+
+if __name__ == "__main__":
+    test_setup()
+EOF
+
+echo -e "${CYAN}Running setup verification...${NC}"
+python "${REPO_DIR}/api-server/test_setup.py"
+
+echo -e "${GREEN}${BOLD}🚀 LLM Server Python Environment Ready!${NC}"
+echo -e "${YELLOW}To activate this environment later, run: source venv/bin/activate${NC}"
+echo -e "${GREEN}Python environment ready! Moving to config setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/setup_configs.sh"
+exec "${SCRIPT_DIR}/setup_configs.sh"
+
+echo -e "${GREEN}Python environment ready! Moving to config setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/setup_configs.sh"
+exec "${SCRIPT_DIR}/setup_configs.sh"
+
+
+### Content of setup_configs.sh ###
+
+#!/bin/bash
+
+# Colors
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+PURPLE='\033[0;35m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Dope ASCII Art
+echo -e "${PURPLE}"
+cat << "EOF"
+🔥 LLM CONFIG SETUP 🔥
+█▀▀ █▀█ █▄░█ █▀▀ █ █▀▀   █▀ █▀▀ ▀█▀ █░█ █▀█
+█▄▄ █▄█ █░▀█ █▀░ █ █▄█   ▄█ ██▄ ░█░ █▄█ █▀▀
+EOF
+echo -e "${NC}"
+
+# Function to print section header
+print_header() {
+    echo -e "\n${PURPLE}${BOLD}[+] $1 ${NC}\n"
+}
+
+# Function to print step
+print_step() {
+    echo -e "${CYAN}[*] $1${NC}"
+}
+
+# Function to print success
+print_success() {
+    echo -e "${GREEN}[✓] $1${NC}"
+}
+
+# Function to print error
+print_error() {
+    echo -e "${RED}[✗] $1${NC}"
+    exit 1
+}
+
+# Function to verify existing setup
+verify_setup() {
+    print_header "VERIFYING SETUP"
+    
+    # Check configs directory
+    if [ ! -d "configs/llm_configs" ]; then
+        print_error "Config directory not found!"
+    fi
+    
+    # Check providers directory
+    if [ ! -d "providers" ]; then
+        print_error "Providers directory not found!"
+    fi
+    
+    # Check provider files
+    if [ ! -f "providers/codellama-local.ts" ] || \
+       [ ! -f "providers/deepseek-local.ts" ] || \
+       [ ! -f "providers/openai-like-ts" ]; then
+        print_error "Provider files missing!"
+    fi
+    
+    print_success "Directory structure verified"
+}
+
+# Function to select active model
+select_active_model() {
+    print_header "SELECT ACTIVE MODEL"
+    
+    # List available models
+    echo -e "${CYAN}Available models:${NC}"
+    PS3="Select model: "
+    options=($(ls configs/llm_configs/*.json | xargs -n 1 basename))
+    select opt in "${options[@]}"; do
+        if [ -n "$opt" ]; then
+            # Create/update symlink
+            ln -sf "llm_configs/$opt" configs/active_model.json
+            print_success "Active model set to: $opt"
+            break
+        else
+            echo -e "${RED}Invalid choice${NC}"
+        fi
+    done
+}
+
+# Function to show setup summary
+show_summary() {
+    print_header "SETUP SUMMARY"
+    
+    # Get active model
+    ACTIVE_MODEL=$(basename "$(readlink -f configs/active_model.json)" .json)
+    
+    echo -e "${YELLOW}Config Directory:${NC} configs/llm_configs/"
+    echo -e "${YELLOW}Available Models:${NC}"
+    for config in configs/llm_configs/*.json; do
+        name=$(jq -r '.name' "$config")
+        provider=$(jq -r '.provider' "$config")
+        echo -e "  - $name (${CYAN}$provider${NC})"
+    done
+    echo -e "${YELLOW}Active Model:${NC} ${GREEN}$ACTIVE_MODEL${NC}"
+    echo -e "${YELLOW}Provider Files:${NC} providers/"
+    
+    echo -e "\n${GREEN}Setup complete! Ready to run server.sh! 🚀${NC}"
+}
+
+# Main execution
+print_header "MANAGING LLM CONFIGS"
+
+# Verify existing setup
+verify_setup
+
+# Select active model
+select_active_model
+
+# Show summary
+show_summary
+
+# Final instructions
+echo -e "\n${CYAN}Next steps:${NC}"
+echo -e "1. Run ${GREEN}./server.sh${NC} to start the server"
+echo -e "2. Run ${GREEN}./expose.sh${NC} to expose it to the internet (optional)"
+echo -e "3. To change models later, just run ${GREEN}./setup_configs.sh${NC} again"
+echo -e "${GREEN}Configs set! Moving to server setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/server_setup.sh"
+exec "${SCRIPT_DIR}/server_setup.sh"
+
+echo -e "${GREEN}Configs set! Moving to server setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/server_setup.sh"
+exec "${SCRIPT_DIR}/server_setup.sh"
+
+
+### Content of server_setup.sh ###
+
+#!/bin/bash
+
+# Colors
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+PURPLE='\033[0;35m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Function to print section header
+print_header() {
+    echo -e "\n${PURPLE}${BOLD}[+] $1 ${NC}\n"
+}
+
+# Function to print step
+print_step() {
+    echo -e "${CYAN}[*] $1${NC}"
+}
+
+# Function to print success
+print_success() {
+    echo -e "${GREEN}[✓] $1${NC}"
+}
+
+# Function to print error
+print_error() {
+    echo -e "${RED}[✗] $1${NC}"
+    exit 1
+}
+
+# Function to check Python environment
+check_python_env() {
+    print_header "CHECKING PYTHON ENVIRONMENT"
+    
+    # Check if venv exists
+    if [ ! -d "venv" ]; then
+        print_error "Virtual environment not found! Run python_setup.sh first."
+    fi
+    
+    # Activate venv
+    source venv/bin/activate || print_error "Failed to activate virtual environment"
+    
+    print_success "Python environment activated"
+}
+
+# Function to install server dependencies
+install_dependencies() {
+    print_header "INSTALLING SERVER DEPENDENCIES"
+    
+    pip install --upgrade pip
+    
+    # Install core dependencies
+    pip install fastapi uvicorn pydantic python-dotenv torch transformers accelerate bitsandbytes sentencepiece protobuf
+    
+    # Install model-specific dependencies
+    MODEL_NAME=$(basename "$(readlink -f configs/active_model.json)" .json)
+    case $MODEL_NAME in
+        "codellama-34b")
+            pip install einops
+            ;;
+        "mixtral-8x7b")
+            pip install flash-attn --no-build-isolation
+            ;;
+        "mistral-7b")
+            pip install safetensors
+            ;;
+    esac
+    
+    print_success "Dependencies installed"
+}
+
+# Function to setup server configuration
+setup_server_config() {
+    print_header "SETTING UP SERVER CONFIGURATION"
+    
+    # Create server config directory
+    mkdir -p api-server/config
+    
+    # Create server config file
+    cat > api-server/config/server_config.json << EOF
+{
+    "host": "0.0.0.0",
+    "port": 8000,
+    "workers": 1,
+    "timeout": 300,
+    "log_level": "info",
+    "cors_origins": ["*"],
+    "max_request_size": 10485760
+}
+EOF
+    
+    print_success "Server configuration created"
+}
+
+# Function to setup logging
+setup_logging() {
+    print_header "SETTING UP LOGGING"
+    
+    # Create logs directory
+    mkdir -p logs
+    
+    # Create logging config
+    cat > api-server/config/logging.conf << EOF
+[loggers]
+keys=root,api
+
+[handlers]
+keys=consoleHandler,fileHandler
+
+[formatters]
+keys=simpleFormatter
+
+[logger_root]
+level=INFO
+handlers=consoleHandler
+
+[logger_api]
+level=INFO
+handlers=fileHandler
+qualname=api
+propagate=0
+
+[handler_consoleHandler]
+class=StreamHandler
+level=INFO
+formatter=simpleFormatter
+args=(sys.stdout,)
+
+[handler_fileHandler]
+class=FileHandler
+level=INFO
+formatter=simpleFormatter
+args=('../logs/api.log', 'a')
+
+[formatter_simpleFormatter]
+format=%(asctime)s - %(name)s - %(levelname)s - %(message)s
+EOF
+    
+    print_success "Logging configuration created"
+}
+
+# Function to setup health check endpoint
+setup_health_check() {
+    print_header "SETTING UP HEALTH CHECK"
+    
+    # Create health check file
+    cat > api-server/health_check.py << 'EOF'
+from fastapi import FastAPI, HTTPException
+import psutil
+import torch
+import os
+
+app = FastAPI()
+
+@app.get("/health")
+async def health_check():
+    try:
+        # System health
+        cpu_percent = psutil.cpu_percent()
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        # GPU health if available
+        gpu_info = None
+        if torch.cuda.is_available():
+            gpu_info = {
+                "gpu_name": torch.cuda.get_device_name(0),
+                "gpu_memory": {
+                    "allocated": torch.cuda.memory_allocated(0) / 1024**3,
+                    "cached": torch.cuda.memory_reserved(0) / 1024**3
+                }
+            }
+        
+        # Model health
+        model_path = os.path.realpath("../configs/active_model.json")
+        model_name = os.path.basename(model_path).replace('.json', '')
+        
+        return {
+            "status": "healthy",
+            "system": {
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory.percent,
+                "disk_percent": disk.percent
+            },
+            "gpu": gpu_info,
+            "model": {
+                "name": model_name,
+                "status": "loaded"
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
+EOF
+    
+    print_success "Health check endpoint created"
+}
+
+# Function to create server management scripts
+create_management_scripts() {
+    print_header "CREATING MANAGEMENT SCRIPTS"
+    
+    # Create start script
+    cat > server.sh << 'EOF'
+#!/bin/bash
+source venv/bin/activate
+cd api-server
+python run.py
+EOF
+    chmod +x server.sh
+    
+    # Create stop script
+    cat > stop_server.sh << 'EOF'
+#!/bin/bash
+pkill -f "python run.py"
+EOF
+    chmod +x stop_server.sh
+    
+    # Create restart script
+    cat > restart_server.sh << 'EOF'
+#!/bin/bash
+./stop_server.sh
+sleep 2
+./server.sh
+EOF
+    chmod +x restart_server.sh
+    
+    print_success "Management scripts created"
+}
+
+# Main execution
+print_header "SERVER SETUP SCRIPT"
+
+# Check Python environment
+check_python_env
+
+# Install dependencies
+install_dependencies
+
+# Setup server configuration
+setup_server_config
+
+# Setup logging
+setup_logging
+
+# Setup health check
+setup_health_check
+
+# Create management scripts
+create_management_scripts
+
+print_success "Server setup complete! 🚀"
+echo -e "\n${YELLOW}To start the server:${NC}"
+echo -e "  ${CYAN}1. ./server.sh${NC} - Start the server"
+echo -e "  ${CYAN}2. ./stop_server.sh${NC} - Stop the server"
+echo -e "  ${CYAN}3. ./restart_server.sh${NC} - Restart the server"
+echo -e "${GREEN}Server ready! Moving to bolt setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/bolt_setup.sh"
+exec "${SCRIPT_DIR}/bolt_setup.sh"
+
+echo -e "${GREEN}Server ready! Moving to bolt setup...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/bolt_setup.sh"
+exec "${SCRIPT_DIR}/bolt_setup.sh"
+
+
+### Content of bolt_setup.sh ###
+
+#!/bin/bash
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+echo -e "${PURPLE}${BOLD}Setting up bolt.diy...${NC}"
+
+# Detect installation directory
+if [ -d "/workspace/llm-server" ]; then
+    INSTALL_DIR="/workspace/llm-server"
+elif [ -d "$HOME/llm-server" ]; then
+    INSTALL_DIR="$HOME/llm-server"
+else
+    echo -e "${CYAN}Enter your installation directory:${NC}"
+    read -r INSTALL_DIR
+fi
+
+# Create LLM configs directory
+LLM_CONFIG_DIR="${INSTALL_DIR}/llm-configs"
+mkdir -p "$LLM_CONFIG_DIR"
+
+# Check if we're running as root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${YELLOW}Not running as root, will use local installations where possible${NC}"
+    SUDO=""
+    BOLT_DIR="$HOME/bolt.diy"
+    NPM_DIR="$HOME/.npm-global"
+    mkdir -p "$NPM_DIR"
+    npm config set prefix "$NPM_DIR"
+    export PATH="$NPM_DIR/bin:$PATH"
+else
+    SUDO="sudo"
+    BOLT_DIR="/root/bolt.diy"
+fi
+
+# Function to store LLM config
+store_llm_config() {
+    local name="$1"
+    cat > "${LLM_CONFIG_DIR}/${name}.conf" << EOF
+LLM_NAME="${name}"
+MODEL_ID="${model_id}"
+DISPLAY_NAME="${display_name}"
+PROVIDER_NAME="${provider_name}"
+MAX_TOKENS="${max_tokens}"
+CONTEXT_WINDOW="${context_window}"
+BASE_URL="${base_url}"
+API_KEY="${api_key}"
+QUANTIZATION="${quantization}"
+MODEL_PATH="${model_path}"
+EOF
+    chmod 600 "${LLM_CONFIG_DIR}/${name}.conf"
+}
+
+# Function to load existing LLM configs
+load_llm_configs() {
+    echo -e "${CYAN}Available LLM configurations:${NC}"
+    local count=1
+    for conf in "${LLM_CONFIG_DIR}"/*.conf; do
+        if [ -f "$conf" ]; then
+            source "$conf"
+            echo -e "${count}) ${YELLOW}${DISPLAY_NAME}${NC}"
+            echo -e "   Model: ${model_id}"
+            echo -e "   Path: ${model_path}"
+            echo -e "   Quantization: ${quantization}"
+            echo -e "   Context: ${context_window} tokens"
+            echo -e ""
+            ((count++))
+        fi
+    done
+}
+
+# Function to create new LLM config
+create_new_llm() {
+    echo -e "${CYAN}Enter LLM details:${NC}"
+    
+    echo -e "${YELLOW}Enter model name (e.g., mistral-7b):${NC}"
+    read -r model_id
+    
+    echo -e "${YELLOW}Enter display name (e.g., Mistral 7B):${NC}"
+    read -r display_name
+    
+    echo -e "${YELLOW}Enter provider name (e.g., MistralLocal):${NC}"
+    read -r provider_name
+    
+    echo -e "${YELLOW}Enter model path (e.g., /path/to/model or HF repo):${NC}"
+    read -r model_path
+    
+    echo -e "${YELLOW}Choose quantization:${NC}"
+    echo "1) 4-bit (Fastest, lowest VRAM)"
+    echo "2) 8-bit (Balance of speed and quality)"
+    echo "3) 16-bit (Best quality, needs most VRAM)"
+    read -r quant_choice
+    case $quant_choice in
+        1) quantization="4-bit" ;;
+        2) quantization="8-bit" ;;
+        3) quantization="16-bit" ;;
+        *) quantization="4-bit" ;;
+    esac
+    
+    echo -e "${YELLOW}Enter max tokens (default: 8192):${NC}"
+    read -r max_tokens
+    max_tokens=${max_tokens:-8192}
+    
+    echo -e "${YELLOW}Enter context window (default: 8192):${NC}"
+    read -r context_window
+    context_window=${context_window:-8192}
+    
+    echo -e "${YELLOW}Enter base URL (default: http://localhost:8000/v1):${NC}"
+    read -r base_url
+    base_url=${base_url:-"http://localhost:8000/v1"}
+    
+    echo -e "${YELLOW}Enter API key (or press enter for none):${NC}"
+    read -r api_key
+    api_key=${api_key:-"sk-1234567890"}
+    
+    # Store the config
+    store_llm_config "${model_id}"
+    
+    echo -e "${GREEN}LLM configuration saved!${NC}"
+}
+
+# Main menu for LLM selection
+llm_menu() {
+    while true; do
+        echo -e "\n${PURPLE}${BOLD}LLM Configuration Menu${NC}"
+        echo -e "1) Use existing LLM config"
+        echo -e "2) Create new LLM config"
+        echo -e "3) Continue with default (CodeLlama)"
+        echo -e "4) Exit"
+        read -r choice
+
+        case $choice in
+            1)
+                if [ -n "$(ls -A "$LLM_CONFIG_DIR" 2>/dev/null)" ]; then
+                    load_llm_configs
+                    echo -e "${YELLOW}Select LLM number:${NC}"
+                    read -r llm_choice
+                    # Load the selected config
+                    local count=1
+                    for conf in "${LLM_CONFIG_DIR}"/*.conf; do
+                        if [ -f "$conf" ] && [ $count -eq $llm_choice ]; then
+                            source "$conf"
+                            break
+                        fi
+                        ((count++))
+                    done
+                else
+                    echo -e "${RED}No LLM configs found. Creating new one...${NC}"
+                    create_new_llm
+                fi
+                break
+                ;;
+            2)
+                create_new_llm
+                break
+                ;;
+            3)
+                # Use default CodeLlama config
+                model_id="codellama-7b-instruct"
+                display_name="CodeLlama 7B Local"
+                provider_name="CodeLlamaLocal"
+                max_tokens=8192
+                context_window=8192
+                base_url="http://localhost:8000/v1"
+                api_key="sk-1234567890"
+                quantization="4-bit"
+                model_path="codellama/CodeLlama-7b-Instruct-hf"
+                store_llm_config "codellama-7b"
+                break
+                ;;
+            4)
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Invalid choice${NC}"
+                ;;
+        esac
+    done
+}
+
+# Function to install system packages
+install_system_packages() {
+    echo -e "${YELLOW}Installing required system packages...${NC}"
+    if command -v apt-get &> /dev/null; then
+        $SUDO apt-get update
+        $SUDO apt-get install -y nodejs npm git curl build-essential
+    elif command -v yum &> /dev/null; then
+        $SUDO yum update -y
+        $SUDO yum install -y nodejs npm git curl gcc gcc-c++ make
+    elif command -v pacman &> /dev/null; then
+        $SUDO pacman -Syu --noconfirm
+        $SUDO pacman -S --noconfirm nodejs npm git base-devel
+    else
+        echo -e "${RED}Unsupported package manager. Please install nodejs, npm, and git manually.${NC}"
+        exit 1
+    fi
+}
+
+# Install required packages
+install_system_packages
+
+# Install NVM
+echo -e "${YELLOW}Installing Node Version Manager...${NC}"
+if [ ! -d "$HOME/.nvm" ]; then
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+    
+    # Add NVM to shell rc file
+    RC_FILE="$HOME/.bashrc"
+    if [ -f "$HOME/.zshrc" ]; then
+        RC_FILE="$HOME/.zshrc"
+    fi
+    
+    # Add NVM to RC file if not already there
+    if ! grep -q "NVM_DIR" "$RC_FILE"; then
+        cat >> "$RC_FILE" << 'EOF'
+
+# NVM Configuration
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+EOF
+    fi
+    
+    echo -e "${GREEN}NVM installed${NC}"
+else
+    echo -e "${YELLOW}NVM already installed${NC}"
+fi
+
+# Install Node.js LTS
+echo -e "${YELLOW}Installing Node.js LTS...${NC}"
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+nvm install --lts
+nvm use --lts
+echo -e "${GREEN}Node.js $(node -v) installed${NC}"
+
+# Install PNPM
+echo -e "${YELLOW}Installing PNPM...${NC}"
+if ! command -v pnpm &> /dev/null; then
+    # Use standalone installation if not root
+    if [ "$EUID" -ne 0 ]; then
+        curl -fsSL https://get.pnpm.io/install.sh | env PNPM_HOME="$HOME/.local/share/pnpm" sh -
+        export PNPM_HOME="$HOME/.local/share/pnpm"
+        export PATH="$PNPM_HOME:$PATH"
+        
+        # Add PNPM to shell rc file
+        if ! grep -q "PNPM_HOME" "$RC_FILE"; then
+            cat >> "$RC_FILE" << EOF
+
+# PNPM Configuration
+export PNPM_HOME="$HOME/.local/share/pnpm"
+export PATH="\$PNPM_HOME:\$PATH"
+EOF
+        fi
+    else
+        curl -fsSL https://get.pnpm.io/install.sh | sh -
+        export PNPM_HOME="/root/.local/share/pnpm"
+        export PATH="$PNPM_HOME:$PATH"
+    fi
+    echo -e "${GREEN}PNPM installed${NC}"
+else
+    echo -e "${YELLOW}PNPM already installed${NC}"
+fi
+
+# Clone bolt.diy if it doesn't exist
+if [ ! -d "$BOLT_DIR" ]; then
+    echo -e "${YELLOW}Cloning bolt.diy repository...${NC}"
+    git clone -b stable https://github.com/stackblitz-labs/bolt.diy.git "$BOLT_DIR"
+    echo -e "${GREEN}bolt.diy cloned successfully${NC}"
+else
+    echo -e "${YELLOW}bolt.diy already exists, checking for updates...${NC}"
+    cd "$BOLT_DIR"
+    git pull origin stable
+fi
+
+# Run LLM menu before installing dependencies
+echo -e "\n${CYAN}Setting up LLM configuration...${NC}"
+llm_menu
+
+# Install bolt.diy dependencies
+echo -e "${YELLOW}Installing bolt.diy dependencies...${NC}"
+cd "$BOLT_DIR"
+
+# Try to use PNPM first, fallback to NPM
+if command -v pnpm &> /dev/null; then
+    pnpm install
+else
+    npm install
+fi
+
+echo -e "\n${GREEN}bolt.diy setup completed!${NC}"
+echo -e "${CYAN}Installation Details:${NC}"
+echo -e "  ${YELLOW}Installation Directory: ${INSTALL_DIR}${NC}"
+echo -e "  ${YELLOW}Bolt.DIY Directory: ${BOLT_DIR}${NC}"
+echo -e "  ${YELLOW}LLM Configs: ${LLM_CONFIG_DIR}${NC}"
+echo -e "  ${YELLOW}Node Version: $(node -v)${NC}"
+echo -e "  ${YELLOW}NPM Version: $(npm -v)${NC}"
+if command -v pnpm &> /dev/null; then
+    echo -e "  ${YELLOW}PNPM Version: $(pnpm -v)${NC}"
+fi
+
+echo -e "\n${CYAN}Selected LLM Configuration:${NC}"
+echo -e "  ${YELLOW}Model: ${display_name}${NC}"
+echo -e "  ${YELLOW}Path: ${model_path}${NC}"
+echo -e "  ${YELLOW}Quantization: ${quantization}${NC}"
+echo -e "  ${YELLOW}Context Window: ${context_window} tokens${NC}"
+
+echo -e "\n${CYAN}Next Steps:${NC}"
+echo -e "1. Run ${YELLOW}cd ${BOLT_DIR}${NC}"
+echo -e "2. Start the server with ${YELLOW}pnpm dev${NC} or ${YELLOW}npm run dev${NC}"
+echo -e "3. Access bolt.diy at ${YELLOW}http://localhost:5173${NC}"
+echo -e "${GREEN}Bolt setup done! Moving to final configuration...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/configure.sh"
+exec "${SCRIPT_DIR}/configure.sh"
+
+echo -e "${GREEN}Bolt setup done! Moving to final configuration...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/configure.sh"
+exec "${SCRIPT_DIR}/configure.sh"
+
+
+### Content of configure.sh ###
+
+#!/bin/bash
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+echo -e "${PURPLE}${BOLD}Configuration Wizard${NC}"
+
+# Detect installation directory
+if [ -d "/workspace/llm-server" ]; then
+    INSTALL_DIR="/workspace/llm-server"
+elif [ -d "$HOME/llm-server" ]; then
+    INSTALL_DIR="$HOME/llm-server"
+else
+    echo -e "${CYAN}Enter your installation directory:${NC}"
+    read -r INSTALL_DIR
+fi
+
+ENV_FILE="${INSTALL_DIR}/.env"
+TOKENS_FILE="${INSTALL_DIR}/.tokens"
+
+# Create files if they don't exist
+if [ ! -f "$ENV_FILE" ]; then
+    touch "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+fi
+
+if [ ! -f "$TOKENS_FILE" ]; then
+    touch "$TOKENS_FILE"
+    chmod 600 "$TOKENS_FILE"
+fi
+
+# Function to get a configuration value
+get_config() {
+    local key="$1"
+    local default="$2"
+    local prompt="$3"
+    local current=""
+    
+    # Check if the key exists in the .env file
+    if [ -f "$ENV_FILE" ]; then
+        current=$(grep "^$key=" "$ENV_FILE" | cut -d= -f2)
+    fi
+    
+    # If current is empty, use default
+    if [ -z "$current" ]; then
+        current="$default"
+    fi
+    
+    # Prompt user for input
+    echo -e "${YELLOW}$prompt (current: $current):${NC}"
+    read -r value
+    
+    # If user didn't enter anything, use current value
+    if [ -z "$value" ]; then
+        value="$current"
+    fi
+    
+    echo "$value"
+}
+
+# Function to update a configuration value
+update_config() {
+    local key="$1"
+    local value="$2"
+    
+    # Check if the key exists in the .env file
+    if [ -f "$ENV_FILE" ] && grep -q "^$key=" "$ENV_FILE"; then
+        # Use awk instead of sed for more reliable replacement
+        awk -v key="$key" -v val="$value" '{
+            if ($0 ~ "^"key"=") {
+                print key"="val
+            } else {
+                print $0
+            }
+        }' "$ENV_FILE" > "${ENV_FILE}.tmp" && mv "${ENV_FILE}.tmp" "$ENV_FILE"
+    else
+        # Add the key
+        echo "$key=$value" >> "$ENV_FILE"
+    fi
+}
+
+# Function to save a token
+save_token() {
+    local key="$1"
+    local value="$2"
+    
+    # Check if the key exists in the tokens file
+    if grep -q "^$key=" "$TOKENS_FILE"; then
+        # Use awk instead of sed for more reliable replacement
+        awk -v key="$key" -v val="$value" '{
+            if ($0 ~ "^"key"=") {
+                print key"="val
+            } else {
+                print $0
+            }
+        }' "$TOKENS_FILE" > "${TOKENS_FILE}.tmp" && mv "${TOKENS_FILE}.tmp" "$TOKENS_FILE"
+    else
+        # Add the key
+        echo "$key=$value" >> "$TOKENS_FILE"
+    fi
+}
+
+# Main configuration menu
+echo -e "${CYAN}Welcome to the configuration wizard!${NC}"
+echo -e "${CYAN}This wizard will help you configure your LLM server.${NC}"
+
+# Model configuration
+echo -e "\n${PURPLE}${BOLD}Model Configuration${NC}"
+echo -e "${CYAN}Select your model:${NC}"
+echo -e "1) CodeLlama 7B (Recommended for most users)"
+echo -e "2) CodeLlama 13B (Better but needs more VRAM)"
+echo -e "3) DeepSeek Coder 6.7B"
+echo -e "4) DeepSeek Coder 33B (Best but needs lots of VRAM)"
+echo -e "5) Custom model"
+read -r model_choice
+
+case $model_choice in
+    1) model="codellama/CodeLlama-7b-Instruct-hf" ;;
+    2) model="codellama/CodeLlama-13b-Instruct-hf" ;;
+    3) model="deepseek-ai/deepseek-coder-6.7b-instruct" ;;
+    4) model="deepseek-ai/deepseek-coder-33b-instruct" ;;
+    5) model=$(get_config "MODEL_NAME" "codellama/CodeLlama-7b-Instruct-hf" "Enter the model name") ;;
+    *) model="codellama/CodeLlama-7b-Instruct-hf" ;;
+esac
+update_config "MODEL_NAME" "$model"
+
+# System paths configuration
+echo -e "\n${PURPLE}${BOLD}System Paths Configuration${NC}"
+cache_dir=$(get_config "TRANSFORMERS_CACHE" "$HOME/.cache/huggingface" "Enter the HuggingFace cache directory")
+update_config "TRANSFORMERS_CACHE" "$cache_dir"
+update_config "HF_HOME" "$cache_dir"
+
+# Model parameters
+echo -e "\n${PURPLE}${BOLD}Model Parameters${NC}"
+ctx=$(get_config "DEFAULT_NUM_CTX" "4096" "Enter the context window size (2048-8192)")
+update_config "DEFAULT_NUM_CTX" "$ctx"
+
+max_tokens=$(get_config "DEFAULT_MAX_TOKENS" "2000" "Enter the maximum tokens to generate")
+update_config "DEFAULT_MAX_TOKENS" "$max_tokens"
+
+temp=$(get_config "DEFAULT_TEMPERATURE" "0.7" "Enter the temperature (0.1-1.0)")
+update_config "DEFAULT_TEMPERATURE" "$temp"
+
+top_p=$(get_config "DEFAULT_TOP_P" "0.95" "Enter the top_p value (0.1-1.0)")
+update_config "DEFAULT_TOP_P" "$top_p"
+
+# GPU Configuration
+echo -e "\n${PURPLE}${BOLD}GPU Configuration${NC}"
+if command -v nvidia-smi &> /dev/null; then
+    echo -e "${GREEN}NVIDIA GPU detected!${NC}"
+    nvidia-smi
+    echo -e "${CYAN}Enter GPU device number (0 for first GPU, all for all GPUs):${NC}"
+    read -r gpu_choice
+    update_config "CUDA_VISIBLE_DEVICES" "${gpu_choice:-0}"
+else
+    echo -e "${YELLOW}No GPU detected, using CPU mode${NC}"
+    update_config "CUDA_VISIBLE_DEVICES" ""
+fi
+
+# API Keys
+echo -e "\n${PURPLE}${BOLD}API Keys${NC}"
+echo -e "${CYAN}Do you want to configure HuggingFace API key? (y/n)${NC}"
+read -r configure_hf
+if [[ $configure_hf == "y" || $configure_hf == "Y" ]]; then
+    hf_key=$(get_config "HUGGINGFACE_API_KEY" "" "Enter your HuggingFace API key")
+    update_config "HUGGINGFACE_API_KEY" "$hf_key"
+    save_token "HUGGINGFACE_API_KEY" "$hf_key"
+fi
+
+# Ngrok configuration
+echo -e "\n${PURPLE}${BOLD}Ngrok Configuration${NC}"
+echo -e "${CYAN}Do you want to configure Ngrok? (y/n)${NC}"
+read -r configure_ngrok
+if [[ $configure_ngrok == "y" || $configure_ngrok == "Y" ]]; then
+    ngrok_token=$(get_config "NGROK_AUTH_TOKEN" "" "Enter your Ngrok auth token")
+    update_config "NGROK_AUTH_TOKEN" "$ngrok_token"
+    save_token "NGROK_AUTH_TOKEN" "$ngrok_token"
+    
+    echo -e "${CYAN}Select ngrok region:${NC}"
+    echo -e "1) United States (us) [default]"
+    echo -e "2) Europe (eu)"
+    echo -e "3) Asia/Pacific (ap)"
+    echo -e "4) Australia (au)"
+    echo -e "5) South America (sa)"
+    echo -e "6) Japan (jp)"
+    echo -e "7) India (in)"
+    read -r region_choice
+
+    case $region_choice in
+        2) ngrok_region="eu" ;;
+        3) ngrok_region="ap" ;;
+        4) ngrok_region="au" ;;
+        5) ngrok_region="sa" ;;
+        6) ngrok_region="jp" ;;
+        7) ngrok_region="in" ;;
+        *) ngrok_region="us" ;;
+    esac
+    update_config "NGROK_REGION" "$ngrok_region"
+fi
+
+echo -e "\n${GREEN}Configuration completed!${NC}"
+echo -e "${CYAN}Your settings have been saved to:${NC}"
+echo -e "  ${YELLOW}Config: ${ENV_FILE}${NC}"
+echo -e "  ${YELLOW}Tokens: ${TOKENS_FILE}${NC}"
+echo -e "${GREEN}Configuration complete! Setting up network...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/expose.sh"
+exec "${SCRIPT_DIR}/expose.sh"
+
+
+### Content of expose.sh ###
+
+#!/bin/bash
+
+# Colors
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+PURPLE='\033[0;35m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Dope ASCII Art
+echo -e "${PURPLE}"
+cat << "EOF"
+🔥 LLM TUNNEL EXPOSER 🔥
+█▄░█ █▀▀ █▀█ █▀█ █▄▀   ▀█▀ █░█ █▄░█ █▄░█ █▀▀ █░░
+█░▀█ █▄█ █▀▄ █▄█ █░█   ░█░ █▄█ █░▀█ █░▀█ ██▄ █▄▄
+EOF
+echo -e "${NC}"
+
+# Function to print section header
+print_header() {
+    echo -e "\n${PURPLE}${BOLD}[+] $1 ${NC}\n"
+}
+
+# Function to print step
+print_step() {
+    echo -e "${CYAN}[*] $1${NC}"
+}
+
+# Function to print success
+print_success() {
+    echo -e "${GREEN}[✓] $1${NC}"
+}
+
+# Function to print error
+print_error() {
+    echo -e "${RED}[✗] $1${NC}"
+    exit 1
+}
+
+# Function to check ngrok installation
+check_ngrok() {
+    print_step "Checking ngrok setup..."
+    
+    if ! command -v ngrok &> /dev/null; then
+        print_step "ngrok not found, installing..."
+        
+        # Detect architecture
+        ARCH=$(uname -m)
+        case $ARCH in
+            x86_64)
+                NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+                ;;
+            aarch64)
+                NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.tgz"
+                ;;
+            *)
+                print_error "Unsupported architecture: $ARCH"
+                ;;
+        esac
+        
+        # Download and install ngrok
+        curl -Lo ngrok.tgz $NGROK_URL
+        sudo tar xvzf ngrok.tgz -C /usr/local/bin
+        rm ngrok.tgz
+        
+        print_success "ngrok installed"
+    else
+        print_success "ngrok already installed"
+    fi
+}
+
+# Function to check environment
+check_environment() {
+    print_step "Checking environment..."
+    
+    # Load environment variables
+    if [ -f ".env.local" ]; then
+        source .env.local
+    else
+        print_error ".env.local not found! Run setup_environment.sh first"
+    fi
+    
+    # Check ngrok token
+    if [ -z "$NGROK_AUTH_TOKEN" ]; then
+        echo -e "${YELLOW}No ngrok auth token found!${NC}"
+        echo -e "${CYAN}Enter your ngrok auth token (from https://dashboard.ngrok.com):${NC}"
+        read -r token
+        
+        if [ -z "$token" ]; then
+            print_error "Token required to expose server"
+        fi
+        
+        echo "NGROK_AUTH_TOKEN=$token" >> .env.local
+        NGROK_AUTH_TOKEN=$token
+    fi
+    
+    print_success "Environment checked"
+}
+
+# Function to configure ngrok
+configure_ngrok() {
+    print_step "Configuring ngrok..."
+    
+    # Create ngrok config directory
+    mkdir -p ~/.ngrok2
+    
+    # Create ngrok config
+    cat > ~/.ngrok2/ngrok.yml << EOF
+authtoken: $NGROK_AUTH_TOKEN
+version: 2
+region: us
+tunnels:
+  api:
+    addr: 8000
+    proto: http
+    inspect: false
+    bind_tls: true
+  web:
+    addr: 3000
+    proto: http
+    inspect: false
+    bind_tls: true
+EOF
+    
+    # Set permissions
+    chmod 600 ~/.ngrok2/ngrok.yml
+    
+    print_success "ngrok configured"
+}
+
+# Function to check services
+check_services() {
+    print_step "Checking if required services are running..."
+    
+    # Check API server
+    if ! curl -s http://localhost:8000/health &>/dev/null; then
+        print_error "API server not running! Start it with ./server.sh first"
+    fi
+    
+    # Check bolt.diy
+    if ! curl -s http://localhost:3000 &>/dev/null; then
+        print_error "bolt.diy not running! Start it with ./launch_bolt.sh first"
+    fi
+    
+    print_success "All services are running"
+}
+
+# Function to start tunnels
+start_tunnels() {
+    print_header "STARTING NGROK TUNNELS"
+    
+    # Create logs directory
+    mkdir -p logs
+    
+    # Kill existing ngrok processes
+    pkill -f ngrok
+    
+    # Start API tunnel
+    print_step "Starting API tunnel..."
+    ngrok http --log=stdout 8000 > logs/ngrok_api.log &
+    
+    # Start Web tunnel
+    print_step "Starting Web tunnel..."
+    ngrok http --log=stdout 3000 > logs/ngrok_web.log &
+    
+    # Wait for tunnels to establish
+    sleep 5
+    
+    # Get tunnel URLs
+    API_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
+    WEB_URL=$(curl -s http://localhost:4041/api/tunnels | jq -r '.tunnels[0].public_url')
+    
+    if [ -z "$API_URL" ] || [ -z "$WEB_URL" ]; then
+        print_error "Failed to get tunnel URLs"
+    fi
+    
+    print_success "Tunnels established"
+    
+    # Update .env.local with new URLs
+    sed -i "s#OPENAI_LIKE_API_BASE_URL=.*#OPENAI_LIKE_API_BASE_URL=$API_URL#g" .env.local
+    
+    print_header "TUNNEL INFORMATION"
+    echo -e "${YELLOW}API Server:${NC} $API_URL"
+    echo -e "${YELLOW}Web Interface:${NC} $WEB_URL"
+    echo -e "\n${GREEN}Your LLM server is now exposed to the internet! 🌍${NC}"
+    
+    # Save tunnel info
+    echo "{\"api_url\": \"$API_URL\", \"web_url\": \"$WEB_URL\"}" > tunnels.json
+}
+
+# Function to create tunnel management scripts
+create_management_scripts() {
+    print_step "Creating management scripts..."
+    
+    # Create stop script
+    cat > stop_tunnels.sh << 'EOF'
+#!/bin/bash
+pkill -f ngrok
+rm -f tunnels.json
+echo "Tunnels stopped"
+EOF
+    chmod +x stop_tunnels.sh
+    
+    # Create restart script
+    cat > restart_tunnels.sh << 'EOF'
+#!/bin/bash
+./stop_tunnels.sh
+sleep 2
+./expose.sh
+EOF
+    chmod +x restart_tunnels.sh
+    
+    print_success "Management scripts created"
+}
+
+# Function to monitor tunnels
+monitor_tunnels() {
+    print_step "Starting tunnel monitor..."
+    
+    while true; do
+        if ! curl -s http://localhost:4040/status &>/dev/null; then
+            print_error "API tunnel died! Check logs/ngrok_api.log"
+        fi
+        if ! curl -s http://localhost:4041/status &>/dev/null; then
+            print_error "Web tunnel died! Check logs/ngrok_web.log"
+        fi
+        sleep 5
+    done &
+    
+    MONITOR_PID=$!
+    echo $MONITOR_PID > tunnel_monitor.pid
+}
+
+# Main execution
+print_header "EXPOSING LLM SERVER"
+
+# Run checks
+check_ngrok
+check_environment
+configure_ngrok
+check_services
+
+# Create management scripts
+create_management_scripts
+
+# Start tunnels
+start_tunnels
+
+# Start monitoring
+monitor_tunnels
+
+# Monitor logs
+print_step "Showing tunnel logs (Ctrl+C to exit)..."
+tail -f logs/ngrok_*.log
+echo -e "${GREEN}Network setup complete! Launching bolt...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/launch_bolt.sh"
+exec "${SCRIPT_DIR}/launch_bolt.sh"
+
+
+### Content of launch_bolt.sh ###
+
+#!/bin/bash
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+echo -e "${PURPLE}${BOLD}🚀 Launching bolt.diy LLM Server...${NC}"
+
+# Check for active model config
+ACTIVE_CONFIG="configs/active_model.json"
+if [ ! -f "$ACTIVE_CONFIG" ]; then
+    echo -e "${RED}❌ No active model config found!${NC}"
+    echo -e "${YELLOW}Run bolt_custom.sh to set up a model first, my guy!${NC}"
+    exit 1
+fi
+
+# Function to check if jq is installed
+check_jq() {
+    if ! command -v jq &> /dev/null; then
+        echo -e "${YELLOW}Installing jq for JSON parsing...${NC}"
+        sudo apt-get update && sudo apt-get install -y jq
+    fi
+}
+
+# Function to load active LLM configuration
+load_llm_config() {
+    echo -e "${CYAN}Loading active LLM configuration...${NC}"
+    export SELECTED_MODEL=$(jq -r '.name' "$ACTIVE_CONFIG")
+    export MODEL_PATH=$(jq -r '.settings.model_path' "$ACTIVE_CONFIG")
+    export QUANTIZATION=$(jq -r '.settings.quantization // "4-bit"' "$ACTIVE_CONFIG")
+    echo -e "${GREEN}Selected Model: $SELECTED_MODEL${NC}"
+}
+
+# Ask for bolt directory if not specified
+if [ -z "$BOLT_DIR" ]; then
+    if [ -d "$HOME/bolt.diy" ]; then
+        BOLT_DIR="$HOME/bolt.diy"
+    else
+        echo -e "${CYAN}Where's your bolt.diy installed? (default: $HOME/bolt.diy)${NC}"
+        read -r BOLT_DIR_INPUT
+        BOLT_DIR=${BOLT_DIR_INPUT:-"$HOME/bolt.diy"}
+    fi
+fi
+
+# Set up Node environment
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+export PNPM_HOME="$HOME/.local/share/pnpm"
+export PATH="$PNPM_HOME:$PATH"
+
+# Check if bolt.diy exists
+if [ ! -d "$BOLT_DIR" ]; then
+    echo -e "${RED}❌ bolt.diy directory not found at ${BOLT_DIR}${NC}"
+    echo -e "${YELLOW}Run bolt_setup.sh first, my guy!${NC}"
+    exit 1
+fi
+
+# Check system resources
+echo -e "${CYAN}Checking system resources...${NC}"
+TOTAL_MEM=$(free -g | awk '/^Mem:/{print $2}')
+GPU_INFO=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null || echo "0")
+GPU_MEM=$((GPU_INFO / 1024))
+
+echo -e "${CYAN}Available RAM: ${GREEN}${TOTAL_MEM}GB${NC}"
+if [ "$GPU_MEM" -gt "0" ]; then
+    echo -e "${CYAN}Available GPU Memory: ${GREEN}${GPU_MEM}GB${NC}"
+else
+    echo -e "${YELLOW}No GPU detected - Running in CPU mode${NC}"
+fi
+
+# Install dependencies and load config
+check_jq
+load_llm_config
+
+# Start the LLM server first
+echo -e "${CYAN}Starting LLM Server...${NC}"
+./server.sh &
+SERVER_PID=$!
+
+# Wait for server to be ready
+echo -e "${YELLOW}Waiting for server to start...${NC}"
+for i in {1..30}; do
+    if curl -s http://localhost:8000/health > /dev/null; then
+        echo -e "${GREEN}Server is ready!${NC}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo -e "${RED}Server failed to start!${NC}"
+        kill $SERVER_PID 2>/dev/null
+        exit 1
+    fi
+    sleep 1
+done
+
+# Check if we got enough resources for the selected model
+MIN_RAM_NEEDED=8
+if [ "$TOTAL_MEM" -lt "$MIN_RAM_NEEDED" ]; then
+    echo -e "${RED}⚠️  Warning: Your system might not have enough RAM to run large models${NC}"
+    echo -e "${YELLOW}Consider using a smaller model or increasing your RAM${NC}"
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        kill $SERVER_PID 2>/dev/null
+        exit 1
+    fi
+fi
+
+# Start bolt.diy
+echo -e "${CYAN}Starting bolt.diy with model: ${GREEN}$SELECTED_MODEL${NC}"
+cd "$BOLT_DIR"
+
+# Launch with the appropriate package manager
+if command -v pnpm &> /dev/null; then
+    echo -e "${GREEN}Launching with pnpm...${NC}"
+    pnpm run dev &
+else
+    echo -e "${YELLOW}pnpm not found, using npm instead...${NC}"
+    npm run dev &
+fi
+BOLT_PID=$!
+
+# Setup ngrok if wanted
+echo -e "\n${YELLOW}Want to expose your server with ngrok? (y/n)${NC}"
+read -r use_ngrok
+if [[ $use_ngrok == "y" || $use_ngrok == "Y" ]]; then
+    ./expose.sh &
+    NGROK_PID=$!
+fi
+
+echo -e "\n${GREEN}🚀 Everything is running!${NC}"
+echo -e "${CYAN}Local URLs:${NC}"
+echo -e "  ${YELLOW}bolt.diy UI: http://localhost:5173${NC}"
+echo -e "  ${YELLOW}LLM Server: http://localhost:8000${NC}"
+
+# Monitor and handle Ctrl+C
+echo -e "\n${YELLOW}Press Ctrl+C to stop everything${NC}"
+trap "kill $SERVER_PID $BOLT_PID $NGROK_PID 2>/dev/null; exit" SIGINT
+
+# Monitor the processes
+while true; do
+    if ! kill -0 $SERVER_PID 2>/dev/null; then
+        echo -e "${RED}Server crashed! Restarting...${NC}"
+        ./server.sh &
+        SERVER_PID=$!
+    fi
+    
+    if ! kill -0 $BOLT_PID 2>/dev/null; then
+        echo -e "${RED}bolt.diy crashed! Restarting...${NC}"
+        cd "$BOLT_DIR"
+        pnpm run dev &
+        BOLT_PID=$!
+    fi
+    sleep 5
+done
+
+### Content of bolt_custom.sh ###
+
+#!/bin/bash
+
+INSTALL_DIR="/home/flintx/llm-server"
+BOLT_DIR="/home/flintx/bolt.diy"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Create directories with proper permissions
+mkdir -p "${INSTALL_DIR}/configs/llm_configs"
+mkdir -p "${BOLT_DIR}/app/lib/modules/llm/providers"
+chmod -R 755 "${INSTALL_DIR}/configs"
+chmod -R 755 "${BOLT_DIR}/app/lib/modules/llm"
+
+# Get LLM details from user
+echo -e "\n${CYAN}📝 Enter LLM details:${NC}"
+read -p "Enter LLM name (e.g., mixtral-8x7b): " llm_name
+read -p "Enter provider name (e.g., mistralai): " provider_name
+read -p "Enter display name (e.g., Mixtral): " display_name
+read -p "Enter model path (HF repo or local): " model_path
+read -p "Enter VRAM required (GB): " vram_gb
+read -p "Enter max tokens: " max_tokens
+
+# Sanitize name
+safe_name=$(echo "$llm_name" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+
+# Create JSON config
+cat > "${INSTALL_DIR}/configs/llm_configs/${safe_name}.json" << EOF
+{
+    "name": "${safe_name}",
+    "provider": "${provider_name}",
+    "model_type": "local",
+    "max_tokens": ${max_tokens},
+    "base_url_key": "${provider_name}_LOCAL_API_BASE_URL",
+    "provider_file": "${safe_name}-local.ts",
+    "api_handler": "${safe_name}.py",
+    "requirements": {
+        "vram_gb": ${vram_gb},
+        "cuda_required": true
+    },
+    "settings": {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "context_window": ${max_tokens},
+        "model_path": "${model_path}",
+        "quantization": "4-bit"
+    }
+}
+EOF
+
+# Create provider file
+cat > "${BOLT_DIR}/app/lib/modules/llm/providers/${safe_name}-local.ts" << EOF
+import { BaseProvider, getOpenAILikeModel } from '../base-provider';
+import type { ModelInfo } from '../types';
+import type { IProviderSetting } from '~/types/model';
+import type { LanguageModelV1 } from 'ai';
+import { logger } from '~/utils/logger';
+
+export default class ${provider_name^}Provider extends BaseProvider {
+    name = '${provider_name}';
+    displayName = '${display_name}';
+    getApiKeyLink = 'http://localhost:8000';
+    labelForGetApiKey = 'Local Server';
+    icon = 'i-carbon-machine-learning-model';
+    requiresApiKey = false;
+    config = {
+        baseUrlKey: '${provider_name^^}_API_BASE_URL',
+        apiTokenKey: '${provider_name^^}_API_KEY',
+        baseUrl: 'http://localhost:8000',
+        modelPath: '${model_path}',
+        quantization: '4-bit'
+    };
+    staticModels: ModelInfo[] = [
+        { 
+            name: '${safe_name}', 
+            label: '${display_name}', 
+            provider: '${provider_name}', 
+            maxTokenAllowed: ${max_tokens},
+            contextWindow: ${max_tokens},
+            pricing: { prompt: 0, completion: 0 }
+        }
+    ];
+    getModelInstance(options: {
+        model: string;
+        serverEnv?: Record<string, string>;
+        apiKeys?: Record<string, string>;
+        providerSettings?: Record<string, IProviderSetting>;
+    }): LanguageModelV1 {
+        const { model } = options;
+        const { baseUrl, apiKey } = this.getProviderBaseUrlAndKey({
+            apiKeys: options.apiKeys,
+            providerSettings: options.providerSettings?.[this.name],
+            serverEnv: options.serverEnv,
+            defaultBaseUrlKey: this.config.baseUrlKey,
+            defaultApiTokenKey: this.config.apiTokenKey
+        });
+        const finalBaseUrl = baseUrl || this.config.baseUrl;
+        const finalApiKey = apiKey || 'sk-1234567890';
+        
+        logger.debug('${provider_name} Provider:', { 
+            baseUrl: finalBaseUrl, 
+            model,
+            modelPath: this.config.modelPath,
+            quantization: this.config.quantization
+        });
+        return getOpenAILikeModel(finalBaseUrl, finalApiKey, model);
+    }
+}
+EOF
+
+# Create registry.ts
+cat > "${BOLT_DIR}/app/lib/modules/llm/registry.ts" << EOF
+import ${provider_name^}LocalProvider from './providers/${safe_name}-local';
+
+export {
+    ${provider_name^}LocalProvider,
+};
+EOF
+
+# Create .env.local
+cat > "${BOLT_DIR}/.env.local" << EOF
+${provider_name^^}_API_BASE_URL=http://localhost:8000
+${provider_name^^}_API_KEY=sk-1234567890
+VITE_LOG_LEVEL=debug
+DEFAULT_NUM_CTX=${max_tokens}
+INSTALL_DIR=${INSTALL_DIR}
+BOLT_DIR=${BOLT_DIR}
+EOF
+
+chmod 600 "${BOLT_DIR}/.env.local"
+
+# Create download_model.py with the fixed token input handling
+cat > "${INSTALL_DIR}/download_model.py" << 'EOF'
+#!/usr/bin/env python3
+from huggingface_hub import hf_hub_download
+import sys
+import logging
+import os
+import json
+from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('download.log')
+    ]
+)
+
+def get_hf_token():
+    # Try environment variable first
+    token = os.getenv('HF_TOKEN')
+    if token:
+        return token
+        
+    # Try token file next
+    token_path = os.path.expanduser('~/.huggingface/token')
+    if os.path.exists(token_path):
+        with open(token_path, 'r') as f:
+            return f.read().strip()
+    
+    # If no token found, prompt user        
+    while True:
+        print("\n🔑 Hugging Face token required!")
+        print("Get your token from: https://huggingface.co/settings/tokens")
+        token = input("Enter token (or 'q' to quit): ").strip()
+        
+        if token.lower() == 'q':
+            print("Download cancelled.")
+            sys.exit(0)
+            
+        if token:
+            # Save token for future use
+            os.makedirs(os.path.expanduser('~/.huggingface'), exist_ok=True)
+            with open(token_path, 'w') as f:
+                f.write(token)
+            return token
+            
+        print("Token cannot be empty! Try again...")
+
+def download_model():
+    try:
+        # Get active model config
+        config_path = "/home/flintx/llm-server/configs/active_model.json"
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+
+        model_path = config['settings']['model_path']
+        model_name = config['name']
+
+        # Set correct filename based on model
+        if "TheBloke" in model_path and "Mistral-7B" in model_path:
+            filename = "mistral-7b-v0.1.Q4_K_M.gguf"
+        else:
+            filename = f"{model_name}.Q4_K_M.gguf"
+
+        token = get_hf_token()
+        if not token:
+            logging.error("❌ No Hugging Face token provided!")
+            return 1
+
+        models_dir = str(Path.home() / "models")
+        os.makedirs(models_dir, exist_ok=True)
+
+        print(f"\n📥 Downloading {model_name}")
+        print(f"📂 From: {model_path}")
+        print(f"📦 File: {filename}")
+        print(f"💾 To: {models_dir}")
+
+        file_path = hf_hub_download(
+            repo_id=model_path,
+            filename=filename,
+            local_dir=models_dir,
+            local_dir_use_symlinks=False,
+            token=token,
+            force_download=True
+        )
+
+        print(f"\n✅ Download complete!")
+        print(f"📍 Model saved to: {file_path}")
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Download failed: {str(e)}")
+        logging.error(f"Download failed: {str(e)}")
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(download_model())
+EOF
+
+# Make download_model.py executable
+chmod +x "${INSTALL_DIR}/download_model.py"
+
+# Create symlink for active model
+ln -sf "${INSTALL_DIR}/configs/llm_configs/${safe_name}.json" "${INSTALL_DIR}/configs/active_model.json"
+
+echo -e "${GREEN}✅ Setup complete!${NC}"
+echo -e "${CYAN}Files created:${NC}"
+echo -e "  ${YELLOW}Config: ${INSTALL_DIR}/configs/llm_configs/${safe_name}.json${NC}"
+echo -e "  ${YELLOW}Provider: ${BOLT_DIR}/app/lib/modules/llm/providers/${safe_name}-local.ts${NC}"
+echo -e "  ${YELLOW}Registry: ${BOLT_DIR}/app/lib/modules/llm/registry.ts${NC}"
+echo -e "  ${YELLOW}Environment: ${BOLT_DIR}/.env.local${NC}"
+echo -e "  ${YELLOW}Download Script: ${INSTALL_DIR}/download_model.py${NC}"
+echo -e "${GREEN}✅ Model config setup complete!${NC}"
+echo -e "${CYAN}Moving to model download...${NC}"
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/download_model.py"
+exec python3 "${SCRIPT_DIR}/download_model.py"
+
+echo -e "${GREEN}✅ Model config setup complete!${NC}"
+echo -e "${CYAN}Moving to model download...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/download_model.py"
+exec python3 "${SCRIPT_DIR}/download_model.py"
+
+
+### Content of download_model.py ###
+
+#!/usr/bin/env python3
+from huggingface_hub import hf_hub_download
+import sys
+import logging
+import os
+import json
+from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('download.log')
+    ]
+)
+
+def get_hf_token():
+    # Try environment variable first
+    token = os.getenv('HF_TOKEN')
+    if token:
+        return token
+        
+    # Try token file next
+    token_path = os.path.expanduser('~/.huggingface/token')
+    if os.path.exists(token_path):
+        with open(token_path, 'r') as f:
+            return f.read().strip()
+    
+    # If no token found, prompt user        
+    while True:
+        print("\n🔑 Hugging Face token required!")
+        print("Get your token from: https://huggingface.co/settings/tokens")
+        token = input("Enter token (or 'q' to quit): ").strip()
+        
+        if token.lower() == 'q':
+            print("Download cancelled.")
+            sys.exit(0)
+            
+        if token:
+            # Save token for future use
+            os.makedirs(os.path.expanduser('~/.huggingface'), exist_ok=True)
+            with open(token_path, 'w') as f:
+                f.write(token)
+            return token
+            
+        print("Token cannot be empty! Try again...")
+
+def download_model():
+    try:
+        # Get active model config
+        config_path = "/home/flintx/llm-server/configs/active_model.json"
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+
+        model_path = config['settings']['model_path']
+        model_name = config['name']
+
+        # Set correct filename based on model
+        if "TheBloke" in model_path and "Mistral-7B" in model_path:
+            filename = "mistral-7b-v0.1.Q4_K_M.gguf"
+        else:
+            filename = f"{model_name}.Q4_K_M.gguf"
+
+        token = get_hf_token()
+        if not token:
+            logging.error("❌ No Hugging Face token provided!")
+            return 1
+
+        models_dir = str(Path.home() / "models")
+        os.makedirs(models_dir, exist_ok=True)
+
+        print(f"\n📥 Downloading {model_name}")
+        print(f"📂 From: {model_path}")
+        print(f"📦 File: {filename}")
+        print(f"💾 To: {models_dir}")
+
+        file_path = hf_hub_download(
+            repo_id=model_path,
+            filename=filename,
+            local_dir=models_dir,
+            local_dir_use_symlinks=False,
+            token=token,
+            force_download=True
+        )
+
+        print(f"\n✅ Download complete!")
+        print(f"📍 Model saved to: {file_path}")
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Download failed: {str(e)}")
+        logging.error(f"Download failed: {str(e)}")
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(download_model())
+
+if __name__ == "__main__":
+    try:
+        exit_code = download_model()
+        if exit_code == 0:
+            print("\n✅ Model download complete!")
+            print("Handing off to server...")
+            
+            # Get script directory and hand off to server.sh
+            script_dir = Path(__file__).parent.absolute()
+            server_script = script_dir / "server.sh"
+            os.chmod(server_script, 0o755)
+            os.execv(str(server_script), [str(server_script)])
+        else:
+            sys.exit(exit_code)
+    except Exception as e:
+        print(f"\n❌ Download failed: {str(e)}")
+if __name__ == "__main__":
+    try:
+        exit_code = download_model()
+        if exit_code == 0:
+            print("\n✅ Model download complete!")
+            print("Starting server...")
+            
+            script_dir = Path(__file__).parent.absolute()
+            server_script = script_dir / "server.sh"
+            os.chmod(server_script, 0o755)
+            os.execv(str(server_script), [str(server_script)])
+        else:
+            sys.exit(exit_code)
+    except Exception as e:
+        print(f"\n❌ Download failed: {str(e)}")
+if __name__ == "__main__":
+    try:
+        exit_code = download_model()
+        if exit_code == 0:
+            print("\n✅ Model download complete!")
+            print("Starting server...")
+            
+            script_dir = Path(__file__).parent.absolute()
+            server_script = script_dir / "server.sh"
+            os.chmod(server_script, 0o755)
+            os.execv(str(server_script), [str(server_script)])
+        else:
+            sys.exit(exit_code)
+    except Exception as e:
+        print(f"\n❌ Download failed: {str(e)}")
+        sys.exit(1)
+
+
+### Content of server.sh ###
+
+#!/bin/bash
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Check if port is provided
+PORT=${1:-8000}
+
+echo -e "${YELLOW}Starting server on port ${PORT}...${NC}"
+
+# Activate virtual environment if it exists
+if [ -d "$HOME/venv" ]; then
+    source "$HOME/venv/bin/activate"
+fi
+
+# Start the server
+echo -e "${GREEN}Starting FastAPI server...${NC}"
+python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT
+
+echo -e "${GREEN}Server started! Launching main process...${NC}"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+chmod +x "${SCRIPT_DIR}/main.py"
+exec python3 "${SCRIPT_DIR}/main.py"
+
+
+### Content of main.py ###
+
+import time
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+import json
+import os
+from llama_cpp import Llama
+
+app = FastAPI()
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    model: str
+    max_tokens: Optional[int] = 1000
+    temperature: Optional[float] = 0.7
+    stream: Optional[bool] = False
+
+def load_active_model():
+    config_path = os.path.join(os.path.dirname(__file__), "configs", "active_model.json")
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        return config
+    except Exception as e:
+        print(f"Error loading model config: {e}")
+        return None
+
+@app.post("/v1/chat/completions")
+async def chat_completion(request: ChatRequest):
+    try:
+        config = load_active_model()
+        if not config:
+            raise HTTPException(status_code=500, detail="No active model configured")
+
+        model_path = os.path.expanduser(f"~/models/{config['settings']['model_path'].split('/')[-1]}.Q4_K_M.gguf")
+        
+        if not os.path.exists(model_path):
+            raise HTTPException(status_code=404, detail=f"Model file not found: {model_path}")
+
+        llm = Llama(
+            model_path=model_path,
+            n_ctx=config['max_tokens'],
+            n_threads=os.cpu_count(),
+        )
+
+        # Format messages into prompt
+        prompt = ""
+        for msg in request.messages:
+            if msg.role == "system":
+                prompt += f"System: {msg.content}\n"
+            elif msg.role == "user":
+                prompt += f"User: {msg.content}\n"
+            elif msg.role == "assistant":
+                prompt += f"Assistant: {msg.content}\n"
+        prompt += "Assistant: "
+
+        # Generate response
+        output = llm(
+            prompt,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            stop=["User:", "System:"],
+            echo=False
+        )
+
+        return {
+            "id": "chatcmpl-" + os.urandom(12).hex(),
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": request.model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": output['choices'][0]['text'].strip()
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": output['usage']['prompt_tokens'],
+                "completion_tokens": output['usage']['completion_tokens'],
+                "total_tokens": output['usage']['total_tokens']
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
