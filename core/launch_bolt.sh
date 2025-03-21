@@ -1,104 +1,53 @@
-#!/bin/bash
+#!/bin/zsh
 
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
+# Cyberpunk colors
+NEON_GREEN='\033[38;5;10m'
+CYBER_PURPLE='\033[38;5;165m'
+CYBER_PINK='\033[38;5;201m'
+CYBER_BLUE='\033[38;5;51m'
 NC='\033[0m'
 
-# Function to setup HuggingFace token
-setup_hf_token() {
-    echo -e "${CYAN}Enter your HuggingFace token:${NC}"
-    read -r token
-    mkdir -p ~/.huggingface
-    echo "$token" > ~/.huggingface/token
-    chmod 600 ~/.huggingface/token
-    echo -e "${GREEN}✅ HuggingFace token saved!${NC}"
+# Directories
+BOLT_DIR="/home/flintx/bolt.diy"
+DEPLOY_DIR="/home/flintx/deploy.bolt"
+
+# Activate pyenv
+eval "$(pyenv init -)"
+eval "$(pyenv virtualenv-init -)"
+pyenv activate bolt-env
+
+echo -e "${CYBER_PURPLE}╔════════════════════════════════════════╗${NC}"
+echo -e "${CYBER_PURPLE}║${NEON_GREEN} 🚀 BOLT.DIY LAUNCH SEQUENCE INITIATED ${CYBER_PURPLE}║${NC}"
+echo -e "${CYBER_PURPLE}╚════════════════════════════════════════╝${NC}"
+
+# Function to check if a process is running on a port
+port_in_use() {
+    lsof -i :$1 >/dev/null 2>&1
 }
 
-# Function to setup ngrok token
-setup_ngrok_token() {
-    echo -e "${CYAN}Enter your ngrok authtoken:${NC}"
-    read -r token
-    mkdir -p ~/.ngrok
-    cat > ~/.ngrok/ngrok.yml << EOF
-authtoken: $token
-version: 2
-EOF
-    chmod 600 ~/.ngrok/ngrok.yml
-    echo -e "${GREEN}✅ ngrok token saved!${NC}"
-}
-
-echo -e "${GREEN}🚀 Checking required tokens...${NC}"
-
-# Check for HuggingFace token
-if [ -f ~/.huggingface/token ]; then
-    echo -e "${GREEN}✅ HuggingFace token found${NC}"
-else
-    echo -e "${YELLOW}⚠️  HuggingFace token not found!${NC}"
-    while true; do
-        echo -e "${CYAN}Do you want to set it up now? (y/n)${NC}"
-        read -r answer
-        case $answer in
-            [Yy]* ) setup_hf_token; break;;
-            [Nn]* ) echo -e "${RED}❌ HuggingFace token required!${NC}"; exit 1;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
+# Kill any existing processes
+if port_in_use 8000; then
+    echo -e "${CYBER_PINK}[!] Port 8000 in use. Terminating process...${NC}"
+    sudo kill $(lsof -t -i:8000)
 fi
 
-# Check for ngrok token
-if [ -f ~/.ngrok/ngrok.yml ]; then
-    echo -e "${GREEN}✅ ngrok token found${NC}"
-else
-    echo -e "${YELLOW}⚠️  ngrok token not found!${NC}"
-    while true; do
-        echo -e "${CYAN}Do you want to set it up now? (y/n)${NC}"
-        read -r answer
-        case $answer in
-            [Yy]* ) setup_ngrok_token; break;;
-            [Nn]* ) echo -e "${RED}❌ ngrok token required!${NC}"; exit 1;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
+if port_in_use 3000; then
+    echo -e "${CYBER_PINK}[!] Port 3000 in use. Terminating process...${NC}"
+    sudo kill $(lsof -t -i:3000)
 fi
 
-echo -e "${GREEN}🚀 Setting up model config...${NC}"
+# Start bolt.diy server
+echo -e "${NEON_GREEN}[+] Launching bolt.diy...${NC}"
+mate-terminal --title="BOLT.DIY Server" --command="zsh -c 'cd \"$BOLT_DIR\" && npm run dev; read \"?Press Enter to close...\"'" &
 
-# Check if we're in the venv
-if [[ "$VIRTUAL_ENV" == "" ]]; then
-    echo -e "${YELLOW}⚠️  Activating virtual environment...${NC}"
-    source /home/flintx/venv/bin/activate
-fi
+# Start ngrok tunnel
+echo -e "${NEON_GREEN}[+] Establishing secure tunnel...${NC}"
+mate-terminal --title="NGROK Tunnel" --command="zsh -c 'eval \"\$(pyenv init -)\" && eval \"\$(pyenv virtualenv-init -)\" && pyenv activate bolt-env && cd \"$DEPLOY_DIR\" && ngrok http 3000; read \"?Press Enter to close...\"'" &
 
-# Copy selected model config to active_model.json
-CONFIG_DIR="/home/flintx/deploy.bolt/src/configs"
-if [ ! -f "$CONFIG_DIR/active_model.json" ]; then
-    echo -e "${RED}❌ No active model config found!${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}🚀 Starting services...${NC}"
-
-echo -e "${CYAN}Starting LLM Server in current terminal...${NC}"
-# Use python explicitly to run main.py
-python /home/flintx/deploy.bolt/core/main.py &
-SERVER_PID=$!
-
-# Wait a bit for server to start
+# Give terminals time to open
 sleep 2
 
-echo -e "${CYAN}Starting bolt.diy in new terminal...${NC}"
-gnome-terminal -- bash -c "source /home/flintx/venv/bin/activate && /home/flintx/deploy.bolt/src/scripts/server.sh" &
-
-echo -e "${CYAN}Starting ngrok tunnel in new terminal...${NC}"
-gnome-terminal -- bash -c "source /home/flintx/venv/bin/activate && /home/flintx/deploy.bolt/src/scripts/expose.sh" &
-
-echo -e "${GREEN}✅ Services starting up:${NC}"
-echo "1. LLM Server: Running in this terminal"
-echo "2. bolt.diy: Check new terminal"
-echo "3. ngrok: Check new terminal"
-
-# Wait for server process
-wait $SERVER_PID
+# Start LLM server
+echo -e "${NEON_GREEN}[+] Initializing LLM Server...${NC}"
+echo -e "${CYBER_BLUE}[*] Starting in current terminal...${NC}"
+nice -n 10 sudo -E python3 core/main.py

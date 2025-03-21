@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -11,12 +10,11 @@ import logging
 import uuid
 import json
 import os
+from monitor import SystemMonitor
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize FastAPI app
+# Initialize FastAPI app and monitor
 app = FastAPI()
+monitor = SystemMonitor()
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,19 +25,18 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-def load_config():
-    try:
-        with open('/home/flintx/deploy.bolt/src/configs/active_model.json', 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading config: {e}")
-        raise
+# Load model config
+try:
+    with open('/home/flintx/deploy.bolt/src/configs/active_model.json', 'r') as f:
+        model_config = json.load(f)
+        MODEL_PATH = model_config['settings']['model_path']
+        MODEL_DISPLAY_NAME = model_config['display_name']
+except Exception as e:
+    raise Exception(f"Failed to load model config: {str(e)}")
 
-config = load_config()
-MODEL_PATH = config["settings"]["model_path"]
-DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", 2048))
-DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", 0.7))
-DEFAULT_TOP_P = float(os.getenv("DEFAULT_TOP_P", 0.95))
+DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", model_config.get('max_tokens', 1024)))
+DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", model_config['settings'].get('temperature', 0.7)))
+DEFAULT_TOP_P = float(os.getenv("DEFAULT_TOP_P", model_config['settings'].get('top_p', 0.95)))
 
 class ChatMessage(BaseModel):
     role: str
@@ -55,24 +52,53 @@ class ChatCompletionRequest(BaseModel):
 
 # Load the model
 try:
+    monitor.update_model_info({
+        "name": MODEL_DISPLAY_NAME,
+        "status": "🔄 Loading Model...",
+        "config": {
+            "quantization": model_config['settings'].get('quantization', '4-bit'),
+            "context_length": str(model_config['settings'].get('context_window', 4096)),
+            "last_loaded": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    })
+    monitor.start()
+
     if torch.cuda.is_available():
-        logger.info("CUDA available, clearing cache...")
         torch.cuda.empty_cache()
-    
-    logger.info(f"Loading model from {MODEL_PATH}...")
-    model = Llama(
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.synchronize()
+
+    # Initialize Llama model with CUDA
+    llm = Llama(
         model_path=MODEL_PATH,
-        n_gpu_layers=-1,  # Use all GPU layers
-        n_ctx=4096,       # Context window
-        n_batch=512       # Batch size
+        n_ctx=model_config['settings'].get('context_window', 4096),
+        n_gpu_layers=-1,  # Use all layers on GPU
+        seed=42,
+        n_threads=os.cpu_count(),
+        use_mlock=True
     )
-    logger.info("Model loaded successfully!")
+
+    # Update monitor with loaded model info
+    gpus = GPUtil.getGPUs()
+    monitor.update_model_info({
+        "status": "✅ Model Ready",
+        "memory_used": f"{torch.cuda.max_memory_allocated()//1024//1024} MiB",
+        "cuda_devices": [
+            {
+                "name": gpu.name,
+                "memory_used": gpu.memoryUsed,
+                "memory_total": gpu.memoryTotal
+            } for gpu in gpus
+        ]
+    })
+
 except Exception as e:
-    logger.error(f"Error loading model: {e}")
+    monitor.update_model_info({
+        "status": f"❌ Error: {str(e)}",
+    })
     raise
 
 def format_prompt(messages: List[ChatMessage]) -> str:
-    """Format the conversation history."""
     prompt = ""
     for msg in messages:
         if msg.role == "system":
@@ -87,28 +113,36 @@ def format_prompt(messages: List[ChatMessage]) -> str:
 @app.post("/v1/chat/completions")
 async def chat_completion(request: ChatCompletionRequest):
     try:
+        monitor.update_model_info({"status": "🔄 Processing Request..."})
+
         prompt = format_prompt(request.messages)
         
-        completion = model.create_completion(
-            prompt=prompt,
+        # Generate response using llama-cpp
+        output = llm(
+            prompt,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             top_p=request.top_p,
-            stream=request.stream
+            echo=False
         )
-        
-        if request.stream:
-            async def generate():
-                for chunk in completion:
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                yield "data: [DONE]\n\n"
-            
-            return StreamingResponse(
-                generate(),
-                media_type="text/event-stream"
-            )
-        
-        response = {
+
+        response_text = output['choices'][0]['text']
+
+        # Update monitor stats after generation
+        gpus = GPUtil.getGPUs()
+        monitor.update_model_info({
+            "status": "✅ Model Ready",
+            "memory_used": f"{torch.cuda.max_memory_allocated()//1024//1024} MiB",
+            "cuda_devices": [
+                {
+                    "name": gpu.name,
+                    "memory_used": gpu.memoryUsed,
+                    "memory_total": gpu.memoryTotal
+                } for gpu in gpus
+            ]
+        })
+
+        return {
             "id": f"chatcmpl-{str(uuid.uuid4())[:8]}",
             "object": "chat.completion",
             "created": int(datetime.now().timestamp()),
@@ -117,27 +151,25 @@ async def chat_completion(request: ChatCompletionRequest):
                 "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": completion["choices"][0]["text"].strip()
+                    "content": response_text.strip()
                 },
                 "finish_reason": "stop"
             }],
-            "usage": completion.get("usage", {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0
-            })
+            "usage": {
+                "prompt_tokens": len(prompt.split()),  # Approximate
+                "completion_tokens": len(response_text.split()),  # Approximate
+                "total_tokens": len(prompt.split()) + len(response_text.split())  # Approximate
+            }
         }
-        
-        return JSONResponse(content=response)
 
     except Exception as e:
-        logger.error(f"Error in chat completion: {e}")
+        monitor.update_model_info({"status": f"❌ Error: {str(e)}"})
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 def health_check():
     return {
-        "status": "ok", 
+        "status": "ok",
         "model": MODEL_PATH,
         "cuda_available": torch.cuda.is_available(),
         "cuda_device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
@@ -145,8 +177,7 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting server with model {MODEL_PATH}")
-    logger.info(f"CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    finally:
+        monitor.stop()

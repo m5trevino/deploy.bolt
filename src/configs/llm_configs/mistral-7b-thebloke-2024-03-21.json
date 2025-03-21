@@ -5,7 +5,7 @@
     "model_type": "local",
     "max_tokens": 8192,
     "base_url_key": "thebloke_LOCAL_API_BASE_URL",
-    "provider_file": "mistral-7b-local.ts",
+    "provider_file": "mistral-7b-q4-local.ts",
     "api_handler": "mistral-7b.py",
     "requirements": {
         "vram_gb": 6,

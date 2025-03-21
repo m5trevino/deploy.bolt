@@ -15,3 +15,9 @@ orjson
 pyyaml
 triton
 xformers
+rich
+psutil
+gputil
+rich
+psutil
+gputil

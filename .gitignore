@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.env
+
+# PyEnv
+.python-version
+
+# Backups
+*.backup
+
+# IDE stuff
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
