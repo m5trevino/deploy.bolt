@@ -74,7 +74,7 @@ TSEOF
 
 # Update registry
 cat > app/lib/modules/llm/registry.ts << 'TSEOF'
-import TheBlokeLocalProvider from './providers/mistral-7b-v0.1-gguf-local';
+import TheBlokeLocalProvider from './src/providers/mistral-7b-v0.1-gguf-local';
 
 export {
     TheBlokeLocalProvider,

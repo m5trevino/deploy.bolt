@@ -49,7 +49,7 @@ def get_hf_token():
 def download_model():
     try:
         # Get active model config
-        config_path = "/home/flintx/llm-server/configs/active_model.json"
+        config_path = "/home/flintx/deploy.bolt/src/configs/active_model.json"
         with open(config_path, 'r') as f:
             config = json.load(f)
 

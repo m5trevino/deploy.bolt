@@ -1,5 +1,6 @@
 {
-    "name": "mistral-7b",
+    "name": "Mistral 7B TheBloke (Added 2024-03-21)",
+    "display_name": "Mistral 7B TheBloke (Added 2024-03-21)",
     "provider": "thebloke",
     "model_type": "local",
     "max_tokens": 8192,
@@ -14,7 +15,7 @@
         "temperature": 0.7,
         "top_p": 0.95,
         "context_window": 8192,
-        "model_path": "TheBloke/Mistral-7B-v0.1-GGUF",
+        "model_path": "/root/models/mistral-7b-v0.1.Q4_K_M.gguf",
         "quantization": "4-bit"
     }
 }
