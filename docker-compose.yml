@@ -1,0 +1,40 @@
+# START ### DOCKER COMPOSE SERVICE DEF ###
+services:
+  bolt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flintx/bolt:dev  # Use a :dev tag for development builds
+    container_name: flintx-bolt-dev # Dev container name
+    restart: unless-stopped
+    # Pulls environment vars from .env file (e.g., HUGGING_FACE_HUB_TOKEN, NGROK_AUTHTOKEN)
+    # Also add MODEL_REPO_ID, MODEL_FILENAME, AUTO_DOWNLOAD_MODEL, AUTO_START_SERVER if needed
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"          # LLM Server API
+      - "7860:7860"          # Port for run_bolt.py UI (if any)
+      - "4040:4040"          # Ngrok UI port (if used)
+    volumes:
+      # Mount logs and models to persist outside container
+      - ./logs:/app/logs
+      # Mount the actual models directory to /home/flintx/models inside container
+      - /home/flintx/models:/home/flintx/models
+      # Mount the project directory for live code editing/config
+      - .:/app
+      # Mount hidden local share dir for model download database
+      - ~/.local/share:/home/flintx/.local/share
+    # START ### RESOURCE LIMITS ###
+    ulimits:
+      memlock:
+        soft: -1 # Unlimited
+        hard: -1 # Unlimited
+    # FINISH ### RESOURCE LIMITS ###
+    deploy:                  # GPU allocation
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all         # Use all available GPUs (0,1 for you)
+              capabilities: [gpu] # Necessary for CUDA access
+# FINISH ### DOCKER COMPOSE SERVICE DEF ###

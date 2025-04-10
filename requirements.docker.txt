@@ -1,0 +1,24 @@
+# Core requirements for llama.cpp server & helper scripts
+llama-cpp-python>=0.2.26
+requests
+rich
+python-dotenv
+PyYAML
+psutil
+tqdm
+huggingface_hub>=0.19.0 # Use a reasonably recent version
+packaging # Used for version comparison in huggingface.py
+
+# Add other dependencies needed by run_bolt.py, ui.py, monitor.py, ngrok.py
+# Example: If run_bolt uses Gradio
+# gradio
+
+# Ensure no conflicting torch versions remain from old setups
+# torch # REMOVE unless specifically needed by run_bolt.py AND compatible
+# torchvision # REMOVE
+# torchaudio # REMOVE
+# transformers # REMOVE unless run_bolt.py uses it for non-LLM tasks
+# accelerate # REMOVE
+# bitsandbytes # REMOVE
+# xformers # REMOVE
+gradio

@@ -1,0 +1,24 @@
+fastapi==0.99.0
+uvicorn==0.24.0
+transformers==4.41.0
+torch==2.2.0
+bitsandbytes==0.45.3
+accelerate==0.23.0
+pyngrok==6.0.0
+huggingface_hub
+sentencepiece
+scipy
+psutil
+pydantic
+python-dotenv
+orjson
+pyyaml
+triton
+xformers
+rich
+psutil
+gputil
+rich
+psutil
+gputil
+>>>>>>> f9dea93e8a1eece5972475a50e422b1d0563f81b
