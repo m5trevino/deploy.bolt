@@ -1,11 +1,40 @@
-__pycache__/
-*.py[cod]
-*$py.class
-.env
-.env.local
-.venv
-venv/
-.DS_Store
-temp_model_info
-tokens/
+# Ignore temporary files and build artifacts
+=0.2.26
+hfsiteinfo.txt
+merged_content.txt
+nvidia_tags.txt
+output.txt
+site/
+venv.json
+
+# Ignore log files
+logs/
 *.log
+*.err
+
+# Ignore backup files and directories
+*.copy
+*/backup/
+
+# Ignore sensitive data and user-specific configurations
+tokens/
+.env
+# If config/ is ignored:
+# config/
+# If terminator_config/ is user-specific:
+# terminator_config/
+
+# Ignore downloaded models (these live outside the repo dir but are mounted)
+# This assumes your models directory is specifically /home/flintx/models
+/home/flintx/models/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore Node.js/pnpm artifacts if Bolt.diy is installed inside (less common for clean repo)
+# If bolt.diy is a submodule or separate repo, ignore the directory itself
+# bolt.diy/node_modules/
+# bolt.diy/dist/
+# bolt.diy/build/
+

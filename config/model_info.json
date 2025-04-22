@@ -1,0 +1,17 @@
+{
+  "repo_id": "TheBloke/Mistral-7B-Instruct-v0.1-GGUF",
+  "files": [
+    "mistral-7b-instruct-v0.1.Q2_K.gguf",
+    "mistral-7b-instruct-v0.1.Q3_K_L.gguf",
+    "mistral-7b-instruct-v0.1.Q3_K_M.gguf",
+    "mistral-7b-instruct-v0.1.Q3_K_S.gguf",
+    "mistral-7b-instruct-v0.1.Q4_0.gguf",
+    "mistral-7b-instruct-v0.1.Q4_K_M.gguf",
+    "mistral-7b-instruct-v0.1.Q4_K_S.gguf",
+    "mistral-7b-instruct-v0.1.Q5_0.gguf",
+    "mistral-7b-instruct-v0.1.Q5_K_M.gguf",
+    "mistral-7b-instruct-v0.1.Q5_K_S.gguf",
+    "mistral-7b-instruct-v0.1.Q6_K.gguf",
+    "mistral-7b-instruct-v0.1.Q8_0.gguf"
+  ]
+}

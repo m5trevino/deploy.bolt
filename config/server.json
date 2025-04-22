@@ -1,0 +1,8 @@
+{
+  "model_path": "/home/flintx/models/Mixtral-8x7B-v0.1-GGUF/Q4_K_M/mixtral-8x7b-v0.1.Q4_K_M.gguf",
+  "host": "0.0.0.0",
+  "port": 8080,
+  "n_ctx": 2048,
+  "n_threads": 6,
+  "n_gpu_layers": 8
+}

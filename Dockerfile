@@ -1,62 +1,69 @@
-# START ### BASE IMAGE ###
-# Use a CUDA 12.x devel image compatible with your host driver
-FROM nvidia/cuda:12.3.2-devel-ubuntu22.04
-# FINISH ### BASE IMAGE ###
+# Use the official NVIDIA CUDA development image matching the toolkit version
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
 
-# START ### ENV VARS ###
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=America/Los_Angeles
-ENV APP_HOME=/app
-# Set HOME for consistency if scripts use Path.home()
-ENV HOME=/home/flintx
-WORKDIR $APP_HOME
-# FINISH ### ENV VARS ###
+ENV DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC LANG=C.UTF-8 PYTHONUNBUFFERED=1
 
-# START ### SYSTEM DEPENDENCIES ###
+# Install dependencies + compat package + CUDA DEV LIBRARIES
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    git-lfs \
-    python3 \
-    python3-pip \
-    python3-venv \
-    build-essential \
-    cmake \
-    supervisor \
-    && useradd -m -d /home/flintx -s /bin/bash flintx \
-    && rm -rf /var/lib/apt/lists/*
-# FINISH ### SYSTEM DEPENDENCIES ###
+    git cmake build-essential python3.10 python3-pip python3-venv sudo terminator \
+    cuda-compat-12-2 \
+    cuda-libraries-dev-12-2 \
+    libcublas-dev-12-2 \
+    libcufft-dev-12-2 \
+    libcurand-dev-12-2 \
+    libcusolver-dev-12-2 \
+    libcusparse-dev-12-2 \
+    # Add findutils to get the 'find' command
+    findutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && ldconfig
 
-# START ### PYTHON DEPENDENCIES ###
-COPY requirements.docker.txt .
+# Verify nvcc
+RUN nvcc --version
 
-# Install Python packages, including compiling llama-cpp-python with CUDA
-# Ensure llama-cpp-python is listed in requirements.docker.txt
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.docker.txt && \
-    CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip3 install --no-cache-dir --force-reinstall --upgrade --no-binary llama-cpp-python llama-cpp-python && \
-    # Clean pip cache again potentially
-    rm -rf /root/.cache/pip
-# FINISH ### PYTHON DEPENDENCIES ###
+# Set CUDA Env Vars (including stubs path)
+ENV CUDA_HOME=/usr/local/cuda-12.2
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${CUDA_HOME}/lib64/stubs:${LD_LIBRARY_PATH}
 
-# START ### APP CODE ###
-COPY . $APP_HOME
+# Keep LDFLAGS pointing to the specific toolkit version's stubs/libs
+ENV LDFLAGS="-L${CUDA_HOME}/lib64/stubs -L${CUDA_HOME}/lib64 -Wl,-rpath,${CUDA_HOME}/lib64/stubs -Wl,-rpath,${CUDA_HOME}/lib64"
 
-# Copy supervisor config
-COPY supervisord.conf /etc/supervisor/conf.d/bolt.conf
+# --- HACK: Find and copy libcuda.so.1 to a standard linker path ---
+# This assumes the nvidia container runtime makes the driver libs available *somewhere* during build
+# It might be in /usr/lib/x86_64-linux-gnu or elsewhere depending on driver install method on host/runtime setup
+RUN find / -name 'libcuda.so.1' -exec cp {} /usr/local/lib/ \; || echo "Warning: libcuda.so.1 not found during build, linking might still fail."
+# Re-run ldconfig AFTER potentially copying the library
+RUN ldconfig
+# --- End Hack ---
 
-# Ensure scripts are executable (run_server.sh will be created by huggingface.py)
-RUN chmod +x scripts/*.py manage.sh launch_hf.sh || true # Allow failure if scripts don't exist yet
-# Fix permissions for mounted volumes potentially accessed by non-root user later
-# RUN chown -R flintx:flintx /home/flintx /app/logs /app/config
-# FINISH ### APP CODE ###
+# Upgrade pip tools
+RUN python3 -m pip install --upgrade pip setuptools wheel packaging
 
-# START ### RUN COMMAND ###
-# Expose ports used by services
-EXPOSE 8080 # llama_cpp.server API
-EXPOSE 7860 # Maybe bolt_app UI?
-EXPOSE 4040 # Ngrok UI
+# Set CMAKE_ARGS (Keep all flags)
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DLLAMA_MLIR=on -DLLAMA_BUILD_EXAMPLES=OFF"
+ENV FORCE_CMAKE=1
 
-# Run supervisord
-# The -n flag runs it in the foreground, which is required for Docker containers
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
-# FINISH ### RUN COMMAND ###
+# Create user flintx
+RUN useradd -m -s /bin/bash flintx && \
+    echo "flintx ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/flintx && \
+    chmod 0440 /etc/sudoers.d/flintx
+
+# Add local bin path
+ENV PATH="/home/flintx/.local/bin:${PATH}"
+
+# Switch user
+USER flintx
+WORKDIR /home/flintx
+
+# Copy requirements
+COPY --chown=flintx:flintx requirements.docker.txt .
+
+# Install Python requirements (Build llama-cpp-python here)
+RUN pip3 install --user --no-cache-dir -r requirements.docker.txt
+
+# Copy app code
+COPY --chown=flintx:flintx . .
+
+# Keep container running indefinitely (useful for exec)
+CMD ["tail", "-f", "/dev/null"]

@@ -1,0 +1,57 @@
+# Use the official NVIDIA CUDA development image matching the toolkit version
+# This includes nvcc, libraries, and proper build environment setup
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
+
+# Avoid prompts during installations & ensure UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+ENV LANG=C.UTF-8
+ENV PYTHONUNBUFFERED=1
+
+# Install remaining dependencies (Python, pip, git, cmake, sudo, terminator etc.)
+# build-essential might already be included, but doesn't hurt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    cmake \
+    build-essential \
+    python3.10 \
+    python3-pip \
+    python3-venv \
+    sudo \
+    terminator \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify nvcc is available from base image
+RUN nvcc --version
+
+# Upgrade Python build tools
+RUN python3 -m pip install --upgrade pip setuptools wheel packaging
+
+# Set Environment Variables for llama-cpp-python build (using the correct flag)
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DLLAMA_MLIR=on"
+ENV FORCE_CMAKE=1
+
+# Create the non-root user 'flintx' and grant sudo NOPASSWD access
+RUN useradd -m -s /bin/bash flintx && \
+    echo "flintx ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/flintx && \
+    chmod 0440 /etc/sudoers.d/flintx
+
+# Add user's potential local bin to PATH
+ENV PATH="/home/flintx/.local/bin:${PATH}"
+
+# Switch to the non-root user 'flintx'
+USER flintx
+WORKDIR /home/flintx
+
+# Copy the requirements file FIRST as user 'flintx'
+COPY --chown=flintx:flintx requirements.docker.txt .
+
+# Install Python requirements using pip3 install --user
+# llama-cpp-python will build here using CUDA from the base image and CMAKE_ARGS
+RUN pip3 install --user --no-cache-dir -r requirements.docker.txt
+
+# Copy the rest of the application code from the build context
+COPY --chown=flintx:flintx . .
+
+# Keep container running (useful for exec)
+CMD ["bash", "-l"]
